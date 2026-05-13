@@ -1,0 +1,2 @@
+[console_scripts]
+power_switcher = power_switcher.__main__:cli

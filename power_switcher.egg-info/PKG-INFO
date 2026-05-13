@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: power_switcher
+Version: 0.1.0
+Requires-Python: >=3.11
+Requires-Dist: evdev>=1.7.0
+Requires-Dist: dasbus>=1.7
+Requires-Dist: click>=8.1
+Provides-Extra: lingua
+Requires-Dist: lingua-language-detector>=2.0; extra == "lingua"
+Provides-Extra: tray
+Requires-Dist: pystray>=0.19; extra == "tray"
+Requires-Dist: Pillow>=10.0; extra == "tray"

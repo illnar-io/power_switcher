@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import signal
 import subprocess
 import time
 
@@ -39,10 +40,21 @@ class KeyProcessor:
         self._pressed: set[int] = set()
         self._injecting = False
         self._ui: UInput | None = None
+        self._keyboards: list[InputDevice] = []
 
         self._undo_data: dict | None = None
         self._undo_ts: float = 0.0
         self.undo_window = 3.0
+
+        self._stop_event = asyncio.Event()
+
+    def _setup_signals(self):
+        try:
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, self._stop_event.set)
+        except Exception:
+            pass
 
     # ── startup ──────────────────────────────────────────────────────────
 
@@ -60,7 +72,7 @@ class KeyProcessor:
                 if not {e.KEY_A, e.KEY_Z, e.KEY_ENTER}.issubset(set(keys)):
                     continue
 
-                # Ignore mice/touchpads (many relative/absolute axes)
+                # Ignore mice/touchpads
                 if e.EV_REL in caps and len(caps[e.EV_REL]) > 3:
                     continue
                 if e.EV_ABS in caps and len(caps[e.EV_ABS]) > 3:
@@ -78,13 +90,17 @@ class KeyProcessor:
         return result
 
     async def run(self):
+        self._setup_signals()
         keyboards = self._find_keyboards()
         if not keyboards:
             raise RuntimeError("No keyboard devices found. Try running with sudo or check group permissions.")
 
-        logger.info(f"Grabbing keyboards: {[k.name for k in keyboards]}")
-        self._ui = UInput.from_device(*keyboards, name="power_switcher-virtual")
-        await asyncio.sleep(0.15)
+        logger.info(f"Keyboards found: {[k.name for k in keyboards]}")
+        
+        self._ui = UInput.from_device(keyboards[0], name="power_switcher-virtual")
+        logger.info("Virtual UInput device created")
+        
+        await asyncio.sleep(0.5)
 
         if isinstance(self.layout_backend, GNOMESwitchBackend):
             self.layout_backend.set_uinput(self._ui)
@@ -92,24 +108,35 @@ class KeyProcessor:
         for kbd in keyboards:
             try:
                 kbd.grab()
+                self._keyboards.append(kbd)
+                logger.debug(f"Grabbed {kbd.name}")
             except IOError as err:
                 logger.error(f"Failed to grab {kbd.name}: {err}")
-        logger.info("Keyboards grabbed")
+        logger.info("All physical keyboards grabbed")
 
         try:
-            await asyncio.gather(*[self._read(kbd) for kbd in keyboards])
+            tasks = [asyncio.create_task(self._read(kbd)) for kbd in keyboards]
+            await self._stop_event.wait()
+            logger.info("Stop signal received, shutting down...")
+            for t in tasks:
+                t.cancel()
         finally:
-            for kbd in keyboards:
+            for kbd in self._keyboards:
                 try:
                     kbd.ungrab()
+                    logger.debug(f"Ungrabbed {kbd.name}")
                 except Exception:
                     pass
             if self._ui:
                 self._ui.close()
+            logger.info("Cleanup complete")
 
     async def _read(self, dev: InputDevice):
-        async for ev in dev.async_read_loop():
-            await self._on_event(ev)
+        try:
+            async for ev in dev.async_read_loop():
+                await self._on_event(ev)
+        except asyncio.CancelledError:
+            pass
 
     # ── event handling ────────────────────────────────────────────────────
 
@@ -260,13 +287,16 @@ class KeyProcessor:
 
         self._injecting = True
         try:
-            for _ in range(len(word)):
+            # +1 for the separator (Space/Enter)
+            for _ in range(len(word) + 1):
                 self._raw_key(e.KEY_BACKSPACE)
                 await asyncio.sleep(0.005)
 
             self._set_layout(target_layout)
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.12)
+            
             self._inject_text(converted, target_layout)
+            self._raw_key(e.KEY_SPACE)
             self._buf.clear()
         finally:
             self._injecting = False
@@ -282,14 +312,15 @@ class KeyProcessor:
 
         self._injecting = True
         try:
-            for _ in range(len(converted)):
+            for _ in range(len(converted) + 1):
                 self._raw_key(e.KEY_BACKSPACE)
                 await asyncio.sleep(0.005)
 
             self._set_layout(original_layout)
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.12)
 
             self._inject_text(original, original_layout)
+            self._raw_key(e.KEY_SPACE)
             self._buf.clear()
         finally:
             self._injecting = False
@@ -321,12 +352,10 @@ class KeyProcessor:
                 kc, shifted = res
                 if shifted:
                     self._ui.write(e.EV_KEY, e.KEY_LEFTSHIFT, 1)
-
                 self._ui.write(e.EV_KEY, kc, 1)
                 self._ui.syn()
                 self._ui.write(e.EV_KEY, kc, 0)
                 self._ui.syn()
-
                 if shifted:
                     self._ui.write(e.EV_KEY, e.KEY_LEFTSHIFT, 0)
                     self._ui.syn()
