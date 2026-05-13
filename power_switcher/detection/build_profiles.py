@@ -7,7 +7,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from ..maps.layout_pair import BIGRAMS_FALLBACK
+from ..maps.layout_set import BIGRAMS_FALLBACK
 
 
 def build_bigram_profile(text: str) -> dict[str, float]:

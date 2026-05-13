@@ -6,35 +6,40 @@ Like PuntoSwitcher / CarambaSwitcher, but for Linux Wayland.
 
 ## How it works
 
-1. **Grabs the physical keyboard** at the kernel level via `evdev` — no compositor involvement
-2. **Passes all keystrokes through** a virtual `UInput` keyboard to the compositor as-is (transparent by default)
-3. **Tracks a rolling word buffer** of characters the user is typing
-4. **On word boundary** (Space / Enter / Tab / punctuation): runs an n-gram language detector on the buffered word; if the word scores higher when converted to the other layout → auto-converts it
-5. **On hotkey press** (e.g. `Alt+Pause`): takes the current word buffer, converts it to the other layout, injects `Backspace × N` + converted text via ydotool, switches layout via DE D-Bus
-6. Works on **KDE, GNOME, COSMIC, any Wayland compositor** — no extensions required for core functionality
+1. **Grabs the physical keyboard** at the kernel level via `evdev` — no compositor involvement.
+2. **Passes all keystrokes through** a virtual `UInput` keyboard to the compositor.
+3. **Tracks a rolling word buffer** of characters the user is typing.
+4. **On word boundary** (Space / Enter / Tab / punctuation): runs an n-gram language detector on the buffered word; if the word scores higher in another layout → auto-converts it.
+5. **Direct Injection**: Erases the word via Backspaces and re-types it in the correct layout directly through the virtual keyboard. No external tools like `ydotool` needed!
+6. **Compositor Native**: Switches system layout via D-Bus (GNOME, KDE) or compositor commands (Sway, Hyprland).
+
+## Features
+
+- **DE Independent**: Works on GNOME, KDE Plasma, Sway, Hyprland, and more.
+- **Multi-Layout Support**: Supports 2, 3, or more layouts (e.g., English, Russian, and Ukrainian).
+- **Fast & Reliable**: Uses direct `uinput` injection for near-instant text conversion.
+- **Zero Configuration for Core**: Auto-detects your desktop environment and keyboards.
 
 ## Requirements
 
 - Linux Wayland session
 - Python 3.11+
 - `python-evdev`, `dasbus`, `click` (Python packages)
-- `ydotool` + `ydotoold` (for text injection)
-- `wl-clipboard` (for selection convert)
-- `g3kb-switch` + GNOME extension (for GNOME layout switching)
 - User in `input` group
 
 ## Quick start
 
 ```bash
-# System setup (one-time)
-sudo dnf install -y python3-evdev python3-dasbus wl-clipboard ydotool g3kb-switch
-sudo usermod -aG input $USER
-# Re-login after adding to input group
+# 1. Install dependencies
+pip install .
 
-# Build n-gram profiles
+# 2. Setup permissions and config
+python -m power_switcher setup
+
+# 3. Build n-gram profiles (optional, built-in fallbacks provided)
 python -m power_switcher.detection.build_profiles
 
-# Run daemon
+# 4. Run daemon
 python -m power_switcher daemon --verbose
 ```
 
@@ -52,9 +57,9 @@ Config file: `~/.config/power_switcher/config.toml`
 
 ```toml
 [general]
+layouts          = ["en", "ru"]    # Supports 2+ layouts
 hotkey_convert   = "alt+pause"
 hotkey_selection = "ctrl+alt+z"
-layout_pair      = ["en", "ru"]    # any pair from: en, ru, ua, de
 default_layout   = "en"
 auto_detect      = true
 
@@ -63,40 +68,14 @@ threshold     = 2.5
 min_word_len  = 3
 ```
 
-## Supported layout pairs
+## Supported Layouts
 
-The `layout_pair` config option accepts any two layout names. Built-in layouts:
+Built-in layouts: `en`, `ru`, `ua`, `de`.
 
-| Code | Layout | Key positions |
-|------|--------|---------------|
-| `en` | English (US QWERTY) | Standard |
-| `ru` | Russian (ЙЦУКЕН) | Standard |
-| `ua` | Ukrainian (ЙЦУКЕН-УК) | `і` on S, `є` on ', `ї` on ], `ґ` on ` |
-| `de` | German (QWERTZ) | Z/Y swapped, umlauts on ;/'/[
-
-Examples:
-
-```toml
-layout_pair = ["en", "ru"]   # English ↔ Russian (default)
-layout_pair = ["en", "ua"]   # English ↔ Ukrainian
-layout_pair = ["en", "de"]   # English ↔ German
-layout_pair = ["ru", "ua"]   # Russian ↔ Ukrainian
-```
-
-Adding a new layout requires:
-1. Add a keycode→char table in `power_switcher/maps/keycode_map.py`
-2. Register it in the `LAYOUTS` dict
-3. Add a bigram fallback in `power_switcher/maps/layout_pair.py` (or provide a corpus in `data/<lang>_corpus.txt`)
-4. Run `python -m power_switcher.detection.build_profiles` to generate the n-gram profile
-
-## Systemd user service
-
-```bash
-mkdir -p ~/.config/systemd/user
-cp systemd/power_switcher.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now power_switcher
-```
+Adding a new layout:
+1. Add a keycode→char table in `power_switcher/maps/keycode_map.py`.
+2. Register it in the `LAYOUTS` dict.
+3. Run `python -m power_switcher.detection.build_profiles`.
 
 ## Architecture
 
@@ -105,18 +84,19 @@ Physical Keyboard → evdev grab → KeyProcessor → UInput passthrough → Com
                                   │
                                   ├─ KeyBuffer (word tracking)
                                   ├─ ModifierState (shift/ctrl/alt)
-                                  ├─ LayoutPair (char maps + n-gram profiles)
-                                  ├─ WrongLayoutDetector (delegates to LayoutPair)
-                                  ├─ LayoutBackend (D-Bus layout switch)
-                                  └─ ydotool (text injection)
+                                  ├─ LayoutSet (multi-layout maps + n-gram profiles)
+                                  ├─ LayoutBackend (D-Bus / IPC layout switch)
+                                  └─ UInput (direct text injection)
 ```
 
-## Supported DEs
+## Supported DEs/Compositors
 
-| DE | Backend | Notes |
-|----|---------|-------|
-| GNOME | `g3kb-switch` | Primary target (Fedora 44 / GNOME 50.1) |
-| KDE Plasma | D-Bus `org.kde.keyboard` | Secondary target |
+| DE/Compositor | Backend | Notes |
+|---------------|---------|-------|
+| **GNOME** | `GNOMESwitchBackend` | Uses UInput key simulation for layout switching. |
+| **KDE Plasma** | `KDELayoutBackend` | Uses D-Bus `org.kde.keyboard`. |
+| **Sway** | `SwayLayoutBackend` | Uses `swaymsg`. |
+| **Hyprland** | `HyprlandLayoutBackend` | Uses `hyprctl`. |
 
 ## License
 

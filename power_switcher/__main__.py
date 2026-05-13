@@ -8,9 +8,8 @@ from pathlib import Path
 
 from .config import Config
 from .core.key_processor import KeyProcessor
-from .detection.wrong_layout import WrongLayoutDetector
 from .layout.detector import detect_layout_backend
-from .maps.layout_pair import LayoutPair
+from .maps.layout_set import LayoutSet
 
 _KEY_NAMES = {
     "alt": e.KEY_LEFTALT,   "lalt": e.KEY_LEFTALT,   "ralt": e.KEY_RIGHTALT,
@@ -31,13 +30,13 @@ def parse_hotkey(s: str) -> frozenset:
             codes.add(kc)
     return frozenset(codes)
 
-
 @click.group()
 def cli():
     """PowerSwitcher — DE-independent layout auto-switcher for Linux Wayland"""
-from .maps.layout_set import LayoutSet
-...
+
+
 @cli.command()
+
 @click.option("--config", default="~/.config/power_switcher/config.toml")
 @click.option("-v", "--verbose", is_flag=True)
 @click.option("--no-auto", is_flag=True, help="Disable auto-detect, hotkey only")
