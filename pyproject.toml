@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "power_switcher"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "evdev>=1.7.0",
+    "dasbus>=1.7",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+lingua = ["lingua-language-detector>=2.0"]
+tray   = ["pystray>=0.19", "Pillow>=10.0"]
+
+[project.scripts]
+power_switcher = "power_switcher.__main__:cli"
