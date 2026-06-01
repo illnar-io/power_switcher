@@ -1,31 +1,26 @@
 from dataclasses import dataclass, field
-
+from collections import deque
+import re
 from evdev import ecodes as e
-
 
 WORD_SEPARATORS = frozenset({
     e.KEY_SPACE, e.KEY_ENTER, e.KEY_KPENTER, e.KEY_TAB,
-    e.KEY_COMMA, e.KEY_DOT, e.KEY_SEMICOLON,
+    e.KEY_COMMA, e.KEY_DOT, e.KEY_SEMICOLON, e.KEY_SLASH, e.KEY_BACKSLASH,
+    e.KEY_LEFTBRACE, e.KEY_RIGHTBRACE, e.KEY_APOSTROPHE, e.KEY_GRAVE
 })
 
 BUFFER_RESET_KEYS = frozenset({
-    e.KEY_ESC, e.KEY_ENTER, e.KEY_KPENTER,
-    e.KEY_UP, e.KEY_DOWN, e.KEY_LEFT, e.KEY_RIGHT,
+    e.KEY_ESC, e.KEY_UP, e.KEY_DOWN, e.KEY_LEFT, e.KEY_RIGHT,
     e.KEY_HOME, e.KEY_END, e.KEY_PAGEUP, e.KEY_PAGEDOWN,
 })
 
-MODIFIER_KEYS = frozenset({
-    e.KEY_LEFTSHIFT, e.KEY_RIGHTSHIFT,
-    e.KEY_LEFTCTRL,  e.KEY_RIGHTCTRL,
-    e.KEY_LEFTALT,   e.KEY_RIGHTALT,
-    e.KEY_LEFTMETA,  e.KEY_RIGHTMETA,
-})
-
-
 @dataclass
 class KeyBuffer:
-    word: list[tuple[int, str]] = field(default_factory=list)
-    max_len: int = 50
+    max_len: int = 100
+    word: deque = field(init=False)
+
+    def __post_init__(self):
+        self.word = deque()
 
     def add(self, keycode: int, char: str):
         if len(self.word) < self.max_len:
@@ -36,7 +31,7 @@ class KeyBuffer:
             self.word.pop()
 
     def flush(self) -> str:
-        text = "".join(c for _, c in self.word)
+        text = self.text
         self.word.clear()
         return text
 
@@ -46,6 +41,10 @@ class KeyBuffer:
     @property
     def text(self) -> str:
         return "".join(c for _, c in self.word)
+
+    @property
+    def length(self) -> int:
+        return len(self.word)
 
     @property
     def keycodes(self) -> list[int]:

@@ -3,8 +3,6 @@ import os
 
 from .backends import (
     GNOMESwitchBackend,
-    GNOMEDBusLayoutBackend,
-    GNOMELayoutBackend,
     KDELayoutBackend,
     SwayLayoutBackend,
     HyprlandLayoutBackend,
@@ -27,30 +25,20 @@ def detect_layout_backend() -> LayoutBackend:
 
     # Sway
     if SwayLayoutBackend.is_available():
-        logger.info("Backend: Sway")
         return SwayLayoutBackend()
 
     # Hyprland
     if HyprlandLayoutBackend.is_available():
-        logger.info("Backend: Hyprland")
         return HyprlandLayoutBackend()
 
     # GNOME
     if any(x in desktop for x in ("GNOME", "UBUNTU", "UNITY", "POP")):
         if GNOMESwitchBackend.is_available():
-            logger.info("Backend: GNOME Switch")
             return GNOMESwitchBackend()
-        if GNOMEDBusLayoutBackend.is_available():
-            logger.info("Backend: GNOME D-Bus Eval")
-            return GNOMEDBusLayoutBackend()
-        if GNOMELayoutBackend.is_available():
-            logger.info("Backend: GNOME g3kb-switch")
-            return GNOMELayoutBackend()
 
     # KDE Plasma
     if any(x in desktop for x in ("KDE", "PLASMA")):
         if KDELayoutBackend.is_available():
-            logger.info("Backend: KDE D-Bus")
             return KDELayoutBackend()
 
     # Fallbacks
