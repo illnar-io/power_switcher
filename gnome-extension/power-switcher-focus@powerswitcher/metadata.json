@@ -1,0 +1,8 @@
+{
+  "uuid": "power-switcher-focus@powerswitcher",
+  "name": "PowerSwitcher Focus",
+  "description": "Exposes the focused window's application id over the session bus so PowerSwitcher can disable auto-correction in chosen applications (terminals, IDEs, games).",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "url": "https://github.com/",
+  "version": 1
+}

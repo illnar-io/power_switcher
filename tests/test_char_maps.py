@@ -1,4 +1,13 @@
-from power_switcher.maps.keycode_map import EN_TO_RU, RU_TO_EN, build_char_map, LAYOUTS, keycode_to_char
+import pytest
+
+from power_switcher.maps.keycode_map import (
+    EN_TO_RU,
+    RU_TO_EN,
+    build_char_map,
+    char_to_keycode,
+    LAYOUTS,
+    keycode_to_char,
+)
 from evdev import ecodes as e
 
 
@@ -73,3 +82,59 @@ def test_available_layouts():
     assert "ru" in LAYOUTS
     assert "ua" in LAYOUTS
     assert "de" in LAYOUTS
+    assert "fr" in LAYOUTS
+    assert "es" in LAYOUTS
+    assert "it" in LAYOUTS
+    assert "pl" in LAYOUTS
+
+
+def test_keycode_to_char_fr_azerty():
+    # AZERTY swaps A/Q, Z/W and puts M on the home row.
+    assert keycode_to_char(e.KEY_Q, "fr") == "a"
+    assert keycode_to_char(e.KEY_A, "fr") == "q"
+    assert keycode_to_char(e.KEY_W, "fr") == "z"
+    assert keycode_to_char(e.KEY_Z, "fr") == "w"
+    assert keycode_to_char(e.KEY_SEMICOLON, "fr") == "m"
+    assert keycode_to_char(e.KEY_2, "fr", shifted=True) == "2"
+    assert keycode_to_char(e.KEY_2, "fr") == "é"
+
+
+def test_keycode_to_char_es():
+    assert keycode_to_char(e.KEY_SEMICOLON, "es") == "ñ"
+    assert keycode_to_char(e.KEY_SEMICOLON, "es", shifted=True) == "Ñ"
+    assert keycode_to_char(e.KEY_LEFTBRACE, "es") == "`"
+    assert keycode_to_char(e.KEY_A, "es") == "a"
+
+
+def test_keycode_to_char_it():
+    assert keycode_to_char(e.KEY_SEMICOLON, "it") == "ò"
+    assert keycode_to_char(e.KEY_APOSTROPHE, "it") == "à"
+    assert keycode_to_char(e.KEY_A, "it") == "a"
+
+
+def test_keycode_to_char_de_backslash_and_slash():
+    # Regression: German '\' is on the '#' key and '-' stays on the '-' key.
+    assert keycode_to_char(e.KEY_BACKSLASH, "de") == "#"
+    assert keycode_to_char(e.KEY_SLASH, "de") == "-"
+    assert keycode_to_char(e.KEY_SLASH, "de", shifted=True) == "_"
+
+
+@pytest.mark.parametrize("layout", sorted(LAYOUTS))
+def test_every_layout_char_round_trips(layout):
+    """Every printable character must map back to the key that produced it."""
+    for keycode, (lo, hi) in LAYOUTS[layout].items():
+        assert char_to_keycode(lo, layout) == (keycode, False)
+        assert char_to_keycode(hi, layout) == (keycode, True)
+
+
+@pytest.mark.parametrize("layout", ["en", "de", "fr", "es", "it", "pl"])
+def test_latin_layouts_type_all_ascii_letters(layout):
+    for ch in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        assert char_to_keycode(ch, layout) is not None, f"{layout} cannot type {ch!r}"
+
+
+def test_en_de_conversion_yz():
+    en_to_de = build_char_map("en", "de")
+    de_to_en = build_char_map("de", "en")
+    assert en_to_de["y"] == "z"
+    assert de_to_en["z"] == "y"

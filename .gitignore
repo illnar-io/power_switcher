@@ -4,6 +4,13 @@ __pycache__/
 *.egg-info/
 .venv/
 .crush/
-data/
+# Rust build artefacts
+/target/
+# Generated/derived scratch data, except the reference word-frequency lists
+# that build_profiles.py needs to regenerate the n-gram profiles.
+data/*
+!data/frequency/
 caramba-switcher-analysis.md
 AGENT_INSTRUCTIONS.md
+# Proprietary reference apps used for reverse engineering (not redistributable).
+ref/

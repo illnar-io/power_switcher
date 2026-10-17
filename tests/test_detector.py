@@ -36,6 +36,41 @@ def test_digit_word_skipped():
     assert ls.find_best_layout("abc123", "en") is None
 
 
+# ── punctuation keys that are letters in another layout ─────────────────
+
+
+def test_punctuated_word_comma_key_converts():
+    # "работа" typed in the English layout: the comma key is 'б'
+    # (р=KEY_H, а=KEY_F, б=KEY_COMMA, о=KEY_J, т=KEY_N, а=KEY_F).
+    ls = _make_set()
+    assert ls.find_best_layout("hf,jnf", "en") == "ru"
+
+
+def test_punctuated_word_dot_key_converts():
+    # "люди" typed in English: the dot key is 'ю' → "k.lb".
+    ls = _make_set()
+    assert ls.find_best_layout("k.lb", "en") == "ru"
+
+
+def test_punctuated_word_semicolon_key_converts():
+    # "тоже" typed in English: the semicolon key is 'ж' → "nj;t".
+    ls = _make_set()
+    assert ls.find_best_layout("nj;t", "en") == "ru"
+
+
+def test_apostrophe_words_are_left_alone():
+    # Genuine English with punctuation must never be converted, even though the
+    # apostrophe key is 'э' in Russian.
+    ls = _make_set()
+    assert ls.find_best_layout("don't", "en") is None
+    assert ls.find_best_layout("it's", "en") is None
+
+
+def test_dotted_email_not_converted():
+    ls = _make_set()
+    assert ls.find_best_layout("user@example.com", "en") is None
+
+
 def test_convert_en_to_ru():
     ls = _make_set()
     assert ls.convert("ghbdtn", "en", "ru") == "привет"

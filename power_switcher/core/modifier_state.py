@@ -64,6 +64,12 @@ class ModifierState:
             
         return action
 
+    def reset_shift_taps(self):
+        """Forget pending shift taps (used after an L+R Shift hotkey)."""
+        self.shift_tap_count = 0
+        self.last_shift_release_ts = 0.0
+        self.last_shift_press_ts = 0.0
+
     @property
     def is_plain(self) -> bool:
         """True if only Shift is allowed (for typing)."""

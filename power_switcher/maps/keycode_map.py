@@ -51,6 +51,7 @@ EN: dict[int, tuple[str, str]] = {
     e.KEY_0:          ('0', ')'),
     e.KEY_MINUS:      ('-', '_'),
     e.KEY_EQUAL:      ('=', '+'),
+    e.KEY_BACKSLASH:  ('\\', '|'),
 }
 
 RU: dict[int, tuple[str, str]] = {
@@ -100,6 +101,7 @@ RU: dict[int, tuple[str, str]] = {
     e.KEY_0:          ('0', ')'),
     e.KEY_MINUS:      ('-', '_'),
     e.KEY_EQUAL:      ('=', '+'),
+    e.KEY_BACKSLASH:  ('\\', '/'),
 }
 
 # Ukrainian — based on XKB symbols/ua (standard Ukrainian ЙЦУКЕН variant)
@@ -150,6 +152,7 @@ UA: dict[int, tuple[str, str]] = {
     e.KEY_0:          ('0', ')'),
     e.KEY_MINUS:      ('-', '_'),
     e.KEY_EQUAL:      ('=', '+'),
+    e.KEY_BACKSLASH:  ('\\', '/'),
 }
 
 # German — based on XKB symbols/de (QWERTZ layout)
@@ -186,7 +189,7 @@ DE: dict[int, tuple[str, str]] = {
     e.KEY_M:          ('m', 'M'),
     e.KEY_COMMA:      (',', ';'),
     e.KEY_DOT:        ('.', ':'),
-    e.KEY_SLASH:      ('#', "'"),
+    e.KEY_SLASH:      ('-', '_'),
     e.KEY_GRAVE:      ('^', '°'),
     e.KEY_1:          ('1', '!'),
     e.KEY_2:          ('2', '"'),
@@ -200,16 +203,126 @@ DE: dict[int, tuple[str, str]] = {
     e.KEY_0:          ('0', '='),
     e.KEY_MINUS:      ('ß', '?'),
     e.KEY_EQUAL:      ('´', '`'),
+    e.KEY_BACKSLASH:  ('#', "'"),
 }
+
+# French — AZERTY (xkb symbols/fr).  Digits are accessed with Shift on AZERTY,
+# and letters occupy different physical keys than QWERTY (A↔Q, Z↔W, M↔;, W↔Z).
+FR: dict[int, tuple[str, str]] = {
+    e.KEY_Q:          ('a', 'A'),
+    e.KEY_W:          ('z', 'Z'),
+    e.KEY_E:          ('e', 'E'),
+    e.KEY_R:          ('r', 'R'),
+    e.KEY_T:          ('t', 'T'),
+    e.KEY_Y:          ('y', 'Y'),
+    e.KEY_U:          ('u', 'U'),
+    e.KEY_I:          ('i', 'I'),
+    e.KEY_O:          ('o', 'O'),
+    e.KEY_P:          ('p', 'P'),
+    e.KEY_LEFTBRACE:  ('^', '¨'),
+    e.KEY_RIGHTBRACE: ('$', '£'),
+    e.KEY_A:          ('q', 'Q'),
+    e.KEY_S:          ('s', 'S'),
+    e.KEY_D:          ('d', 'D'),
+    e.KEY_F:          ('f', 'F'),
+    e.KEY_G:          ('g', 'G'),
+    e.KEY_H:          ('h', 'H'),
+    e.KEY_J:          ('j', 'J'),
+    e.KEY_K:          ('k', 'K'),
+    e.KEY_L:          ('l', 'L'),
+    e.KEY_SEMICOLON:  ('m', 'M'),
+    e.KEY_APOSTROPHE: ('ù', '%'),
+    e.KEY_Z:          ('w', 'W'),
+    e.KEY_X:          ('x', 'X'),
+    e.KEY_C:          ('c', 'C'),
+    e.KEY_V:          ('v', 'V'),
+    e.KEY_B:          ('b', 'B'),
+    e.KEY_N:          ('n', 'N'),
+    e.KEY_M:          (',', '?'),
+    e.KEY_COMMA:      (';', '.'),
+    e.KEY_DOT:        (':', '/'),
+    e.KEY_SLASH:      ('!', '§'),
+    e.KEY_BACKSLASH:  ('*', 'µ'),
+    e.KEY_GRAVE:      ('²', '~'),
+    e.KEY_1:          ('&', '1'),
+    e.KEY_2:          ('é', '2'),
+    e.KEY_3:          ('"', '3'),
+    e.KEY_4:          ("'", '4'),
+    e.KEY_5:          ('(', '5'),
+    e.KEY_6:          ('-', '6'),
+    e.KEY_7:          ('è', '7'),
+    e.KEY_8:          ('_', '8'),
+    e.KEY_9:          ('ç', '9'),
+    e.KEY_0:          ('à', '0'),
+    e.KEY_MINUS:      (')', '°'),
+    e.KEY_EQUAL:      ('=', '+'),
+}
+
+# Spanish — QWERTY letters (xkb symbols/es "basic", include latin(type4)).
+# ñ sits on the semicolon key; ` and ^ are dead keys on the bracket key.
+ES: dict[int, tuple[str, str]] = dict(EN)
+ES.update({
+    e.KEY_GRAVE:      ('º', 'ª'),
+    e.KEY_3:          ('3', '·'),
+    e.KEY_6:          ('6', '&'),
+    e.KEY_7:          ('7', '/'),
+    e.KEY_8:          ('8', '('),
+    e.KEY_9:          ('9', ')'),
+    e.KEY_0:          ('0', '='),
+    e.KEY_MINUS:      ("'", '?'),
+    e.KEY_EQUAL:      ('¡', '¿'),
+    e.KEY_LEFTBRACE:  ('`', '^'),
+    e.KEY_RIGHTBRACE: ('+', '*'),
+    e.KEY_SEMICOLON:  ('ñ', 'Ñ'),
+    e.KEY_APOSTROPHE: ('´', '¨'),
+    e.KEY_BACKSLASH:  ('ç', 'Ç'),
+    e.KEY_COMMA:      (',', ';'),
+    e.KEY_DOT:        ('.', ':'),
+    e.KEY_SLASH:      ('-', '_'),
+})
+
+# Italian — QWERTY letters (xkb symbols/it, include latin(type4)).
+# Accented vowels sit on the punctuation keys (è é ò à ù ì).
+IT: dict[int, tuple[str, str]] = dict(EN)
+IT.update({
+    e.KEY_GRAVE:      ('\\', '|'),
+    e.KEY_2:          ('2', '"'),
+    e.KEY_3:          ('3', '£'),
+    e.KEY_6:          ('6', '&'),
+    e.KEY_7:          ('7', '/'),
+    e.KEY_8:          ('8', '('),
+    e.KEY_9:          ('9', ')'),
+    e.KEY_0:          ('0', '='),
+    e.KEY_MINUS:      ("'", '?'),
+    e.KEY_EQUAL:      ('ì', '^'),
+    e.KEY_LEFTBRACE:  ('è', 'é'),
+    e.KEY_RIGHTBRACE: ('+', '*'),
+    e.KEY_SEMICOLON:  ('ò', 'ç'),
+    e.KEY_APOSTROPHE: ('à', '°'),
+    e.KEY_BACKSLASH:  ('ù', '§'),
+    e.KEY_COMMA:      (',', ';'),
+    e.KEY_DOT:        ('.', ':'),
+    e.KEY_SLASH:      ('-', '_'),
+})
+
+# Polish — "programmers'" layout (xkb symbols/pl "basic"): identical to US
+# QWERTY.  Diacritics (ą ć ę ł ń ó ś ź ż) are produced with AltGr and therefore
+# never appear as plain keycodes.
+PL: dict[int, tuple[str, str]] = dict(EN)
+PL.update({
+    e.KEY_GRAVE:      ('`', '~'),
+})
 
 LAYOUTS: dict[str, dict[int, tuple[str, str]]] = {
     "en": EN,
     "ru": RU,
     "ua": UA,
     "de": DE,
+    "fr": FR,
+    "es": ES,
+    "it": IT,
+    "pl": PL,
 }
-
-
 def get_layout(name: str) -> dict[int, tuple[str, str]]:
     layout = LAYOUTS.get(name)
     if layout is None:
