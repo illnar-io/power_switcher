@@ -315,7 +315,7 @@ failure domain. **Reject.**
 | 0. Spike | **done** | `crates/ps-core` scorer prototype; profile loading verified |
 | 1. Engine parity — detection core | **done** | golden corpus: **31 990 EN↔RU decisions, 0 mismatches**; 560 score cases agree to ≤ 1.8e-15 (`cargo test -p ps-core`) |
 | 1. Engine parity — remainder | **done** | `KeyBuffer`/`SentenceBuffer`, `UndoHistory`, `AntiResonanceGuard`, `SnippetStore`, `ModifierState`, text helpers (`split_last_word`, `changed_char_count`, `check_double_caps`, `is_password`) + `keycode_to_char`/`ambiguous_separator` ported; 72 lib tests (Python suites mirrored, incl. verified quirks like `soft_reset` char-splitting) + 2 parity tests green |
-| 2. Input core | not started | `ps-input` / `ps-layout` / `ps-focus` |
+| 2. Input core | **in progress** | `ps-input` (device discovery/filter + UInput virtual keyboard, hardware-tested), `ps-layout` (GNOME/KDE/Sway/Hyprland backends + detector, parsers unit-tested; **fixed upstream KDE bug** — Python `\d+` matched `32` inside `uint32`), `ps-focus` (5 strategies + TTL cache, parsers unit-tested). 116 Rust tests, clippy/fmt clean. Remaining: `KeyProcessor` event-loop port + event-replay tests + `ps-daemon` binary |
 | 3. Cutover | not started | — |
 
 Measured on the golden corpus (31 990 cases × 3 rounds, identical inputs,

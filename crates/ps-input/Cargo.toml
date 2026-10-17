@@ -1,0 +1,10 @@
+[package]
+name = "ps-input"
+description = "PowerSwitcher input: evdev device enumeration, keyboard grabbing, UInput virtual device"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+evdev = "0.13"
+log = "0.4"

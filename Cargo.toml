@@ -2,6 +2,9 @@
 resolver = "2"
 members = [
     "crates/ps-core",
+    "crates/ps-input",
+    "crates/ps-layout",
+    "crates/ps-focus",
 ]
 
 [workspace.package]

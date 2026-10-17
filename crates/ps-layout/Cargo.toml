@@ -1,0 +1,12 @@
+[package]
+name = "ps-layout"
+description = "PowerSwitcher layout backends: GNOME, KDE, Sway, Hyprland layout switching"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ps-input = { path = "../ps-input" }
+log = "0.4"
+regex = "1"
+serde_json = "1"
