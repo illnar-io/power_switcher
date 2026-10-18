@@ -30,6 +30,9 @@ pub struct LayoutMaps {
     tables: HashMap<String, KeyTable>,
     by_kc: HashMap<String, HashMap<u32, (char, char)>>,
     char_maps: HashMap<(String, String), HashMap<char, char>>,
+    /// char → (keycode, shifted), one per layout, built lazily
+    /// (Python `keycode_map._REVERSE_MAPS`).
+    reverse_maps: HashMap<String, HashMap<char, (u32, bool)>>,
 }
 
 impl LayoutMaps {
@@ -98,6 +101,31 @@ impl LayoutMaps {
             .get(layout)
             .and_then(|m| m.get(&kc))
             .map(|&(lo, hi)| if shifted { hi } else { lo })
+    }
+
+    /// (keycode, shifted) needed to type `ch` in `layout`, or `None` when the
+    /// character is not on the layout.  Port of `keycode_map.char_to_keycode`:
+    /// the table is walked in insertion order and later rows win, exactly like
+    /// `build_reverse_map`.
+    pub fn char_to_keycode(&mut self, ch: char, layout: &str) -> Option<(u32, bool)> {
+        if !self.reverse_maps.contains_key(layout) {
+            let mut m: HashMap<char, (u32, bool)> = HashMap::new();
+            if let Some(table) = self.tables.get(layout) {
+                for (kc, lo, hi) in table {
+                    if let Some(lo) = first_char(lo) {
+                        m.insert(lo, (*kc, false));
+                    }
+                    if let Some(hi) = first_char(hi) {
+                        m.insert(hi, (*kc, true));
+                    }
+                }
+            }
+            self.reverse_maps.insert(layout.to_string(), m);
+        }
+        self.reverse_maps
+            .get(layout)
+            .and_then(|m| m.get(&ch))
+            .copied()
     }
 
     /// Re-map every character of `word` from one layout to another.

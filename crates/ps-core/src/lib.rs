@@ -20,19 +20,23 @@
 //! * `KeyProcessor` text helpers → [`text`]
 
 pub mod anti_resonance;
+pub mod app_exceptions;
 pub mod key_buffer;
 pub mod layout_set;
 pub mod layouts;
 pub mod modifier_state;
 pub mod ngram;
 pub mod snippets;
+pub mod stats;
 pub mod text;
 pub mod undo_history;
 
 pub use anti_resonance::AntiResonanceGuard;
+pub use app_exceptions::ExceptionStore;
 pub use key_buffer::{KeyBuffer, SentenceBuffer};
 pub use layout_set::LayoutSet;
 pub use modifier_state::{ModifierState, ShiftAction};
 pub use ngram::NGramDetector;
 pub use snippets::SnippetStore;
+pub use stats::Stats;
 pub use undo_history::{UndoEntry, UndoHistory};

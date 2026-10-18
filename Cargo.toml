@@ -5,6 +5,7 @@ members = [
     "crates/ps-input",
     "crates/ps-layout",
     "crates/ps-focus",
+    "crates/ps-engine",
 ]
 
 [workspace.package]

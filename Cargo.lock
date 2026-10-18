@@ -191,6 +191,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ps-engine"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "ps-core",
+ "ps-focus",
+ "tempfile",
+]
+
+[[package]]
 name = "ps-focus"
 version = "0.1.0"
 dependencies = [

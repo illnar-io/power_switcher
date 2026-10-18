@@ -219,6 +219,26 @@ impl LayoutSet {
         self.maps.keycode_to_char(u32::from(kc), layout, shifted)
     }
 
+    /// (keycode, shifted) to type `ch` in `layout` — port of
+    /// `LayoutSet.char_to_keycode`; `None` when the character is not on the
+    /// layout.
+    pub fn char_to_keycode(&mut self, ch: char, layout: &str) -> Option<(u16, bool)> {
+        self.maps
+            .char_to_keycode(ch, layout)
+            .map(|(kc, shifted)| (kc as u16, shifted))
+    }
+
+    /// Clone of the layout→layout character map (Python `build_char_map`) —
+    /// used for snippet canonicalisation.  Unknown layouts yield an empty
+    /// (identity) map, matching Python's `except ValueError: {}`.
+    pub fn char_map_clone(
+        &mut self,
+        from: &str,
+        to: &str,
+    ) -> std::collections::HashMap<char, char> {
+        self.maps.char_map(from, to).clone()
+    }
+
     /// True when `kc` produces a letter in some configured layout.
     ///
     /// The comma key is ',' in English but 'б' in Russian; the semicolon key
