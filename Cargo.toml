@@ -6,6 +6,7 @@ members = [
     "crates/ps-layout",
     "crates/ps-focus",
     "crates/ps-engine",
+    "crates/ps-daemon",
 ]
 
 [workspace.package]

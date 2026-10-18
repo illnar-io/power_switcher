@@ -23,12 +23,39 @@ model format, workspace layout, and "don't convert" regexes).
 | 0. Spike | ✅ done |
 | 1. Engine parity (ps-core) | ✅ done — golden corpus 31,990 EN↔RU decisions, **0 mismatches**; scores agree to ≤1.8e-15 |
 | 2. Input core (ps-input, ps-layout, ps-focus, ps-engine) | ✅ done — full KeyProcessor port + 16 event-replay tests |
-| 3. Cutover (ps-daemon binary) | ❌ next — the only remaining piece |
+| 3. Cutover (ps-daemon) | 🔶 **in progress** — `ps` binary works live on GNOME (see below) |
 | 4. Yofikator/autocorrect/model | ❌ not started |
 | 5. Native GUI | ❌ not started |
 
-Test counts: **Rust 149** (`cargo test --workspace`), **Python 135**
+Test counts: **Rust 157** (`cargo test --workspace`), **Python 135**
 (`PYTHONPATH=. python3 -m pytest -q`). Both must stay green; clippy/fmt clean.
+
+### Phase 3 status (what works today)
+
+`crates/ps-daemon` builds the `ps` binary. **Validated live on this machine
+(GNOME/Wayland, real AT Translated Set 2 keyboard):**
+
+```
+timeout 4 ./target/debug/ps daemon --debug
+```
+
+produced the full startup path: GNOME backend detected (IBus address +
+dconf sources `us`/`ru`), startup banner, real-keyboard grab, initial layout
+synced to `ru` (read from GNOME via dconf — correct), reader thread running,
+clean SIGTERM shutdown. Direct-injection is proven by a loopback test
+(uinput → kernel → /dev/input node, `KEY_FN`, harmless on a live desktop).
+
+Still open in Phase 3:
+1. **Manual real-typing validation by the user** — run the daemon, type
+   wrong-layout words, confirm conversions land (cannot be automated safely
+   from a session where the daemon would grab the typing keyboard).
+2. `ps --debug` trace diff vs the Python daemon's audit log (same inputs).
+3. 1 h soak (flat RSS, no dropped keys) — migration doc §8.
+4. Optional: systemd user unit, `ksni` tray (plan §12).
+
+⚠️ **Never run `ps daemon` (or the Python daemon) in an unattended shell** —
+it grabs the real keyboard and the user cannot type until it stops.
+`timeout N ./ps daemon` is the safe pattern for validation.
 
 ## Workspace layout
 
@@ -122,30 +149,49 @@ PYTHONPATH=. python3 tools/bench_python.py                  # Python bench
 - Tests that need `/dev/uinput` skip gracefully when it's absent; focus tests
   adapt to which tools (swaymsg/hyprctl/kdotool/qdbus/xdotool/gdbus) exist.
 
-## Next move — Phase 3 (cutover)
+## Next move — finish Phase 3
 
-Build `crates/ps-daemon` (binary `ps`):
+1. **User validation of live typing**: start `./target/debug/ps daemon`,
+   type `ghbdtn` + Space in a text field → expect `привет`; double-tap Shift →
+   back to `ghbdtn`; L+R Shift pauses.  (The engine and replay tests cover
+   this logic; only the live compositing needs human eyes.)
+2. Trace comparison: `ps daemon --debug` prints one line per event with its
+   action stream — diff against the Python daemon's
+   `~/.cache/power_switcher/audit.log` for identical typing sessions.
+3. Soak test (1 h synthetic typing, flat RSS) — migration doc §8.
+4. systemd user unit + `ksni` tray (optional, plan §12).
+5. Then phases 4a/4b/4c (yofikator, autocorrect, bundled `psm` model) and 5
+   (native GUI) per the plan.
 
-1. **Event loop**: grab keyboards (`ps_input::find_keyboards` + `Device::grab`),
-   read events (blocking thread per keyboard or one poll loop), call
-   `processor.on_event(ev, now)`, execute the returned `Action`s:
-   - `Emit`/`Inject` → `VirtualKeyboard::key` (inject: sleep `delay_ms` after);
-   - `SetLayout` → the `ps_layout::LayoutBackend`;
-   - `Pause` → sleep;
-   - `Sound` → spawn `paplay` (best-effort).
-2. **Startup parity** with Python `run()`: create uinput from keyboards[0],
-   hand it to the GNOME backend (`set_virtual_keyboard`), sync initial layout
-   from `backend.get_current_index()`, `refresh_front_app`.
-3. **`ps --debug` mode**: dump per-event action traces to compare against the
-   Python daemon's audit log (exit criterion: no dropped/reordered keys).
-4. CLI: `ps daemon --verbose`, `ps debug`, `ps setup`; keep the tkinter GUI
-   until phase 5. Signal handling: on SIGINT/SIGTERM — ungrab, save stats.
-5. Config loading (`config.toml`) — port `power_switcher/config.py` fields
-   into `ProcessorConfig`.
-6. Soak test (1 h synthetic typing, flat RSS) — see migration doc §8.
+### Daemon architecture (as built)
 
-Then phases 4a/4b/4c (yofikator, autocorrect, bundled `psm` model) and 5
-(native GUI) per the plan.
+* one reader thread per grabbed keyboard → `mpsc` channel of `RawEvent`;
+* main loop: `recv_timeout(50ms)` (doubles as shutdown poll) →
+  `processor.on_event(ev, now)` → execute `Action`s:
+  `Emit`/`Inject{delay_ms}` → `VirtualKeyboard::key` (shared with the GNOME
+  backend via `Arc<Mutex<_>>`, Python's `set_uinput` equivalent),
+  `SetLayout` → backend, `Pause`/`Sound` → sleep/`paplay`;
+* signal thread (signal-hook) raises an `AtomicBool`; cleanup = forced stats
+  save + exit (kernel releases grabs on fd close — Python did ungrab +
+  `os._exit(0)`, same observable result);
+* reader threads poll `fetch_events()` with a 1 ms idle sleep (fd is
+  non-blocking in evdev 0.13);
+* profiles/layouts data resolution: `PS_PROFILES_DIR` / `PS_LAYOUTS_JSON`
+  env vars, else the repo checkout paths (packaging comes with phase 4c);
+* `ps` subcommands: `daemon [--config] [-v] [--no-auto] [--debug]`,
+  `setup`, `debug` (passive listen, no grab — same loose EV_KEY filter and
+  first-device quirk as Python).  Snippets/exceptions/words/stats CLI stay in
+  the Python module — they share file formats and don't need the event loop.
+
+### Config gotcha (fixed, regression-tested)
+
+The real user config at `~/.config/power_switcher/config.toml` only has
+`[general]` and `[detection]` sections.  The first daemon attempt crashed on
+`missing field triggers` — Rust struct fields now use `#[serde(default)]`
+per section, matching Python's `d.get("triggers", {})`.  Also: Python's
+`default_layout` falls back to the *loaded* `layouts[0]` (ported), and
+`--no-auto` actually starts paused in Rust (Python only echoed it — upstream
+bug, documented in the code).
 
 ## Session log (what happened, newest last)
 
@@ -157,3 +203,11 @@ Then phases 4a/4b/4c (yofikator, autocorrect, bundled `psm` model) and 5
    detector + timeout proc helper), ps-focus (strategies + TTL), ps-core
    additions (Stats, ExceptionStore, char_to_keycode), ps-engine (full
    KeyProcessor port + 16 replay tests). Committed as 2 further commits.
+5. Phase 3: ps-daemon (`ps` binary: daemon/setup/debug), TOML config loader
+   (section-tolerant; regression-tested against the real user config),
+   signal handling, `--debug` action traces, `--no-auto` (actually applied,
+   unlike Python). Validated live on GNOME: grab, IBus discovery, layout sync
+   to `ru`, clean SIGTERM shutdown. Direct-injection loopback test added to
+   ps-input (uinput → /dev/input node; note the udev permission race — open
+   with retries). ydotoold present but its socket is dead → cannot inject
+   synthetic keys externally; loopback test covers this instead.

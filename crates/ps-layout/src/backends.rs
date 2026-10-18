@@ -6,6 +6,7 @@
 //! timeouts as the Python daemon; output parsing is delegated to [`crate::parse`].
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use log::{info, warn};
@@ -32,6 +33,13 @@ pub trait LayoutBackend {
     fn set_layout(&mut self, index: usize);
     /// Backend name (for logs).
     fn name(&self) -> &'static str;
+
+    /// Hand the virtual keyboard to the backend if it injects keys itself.
+    /// Rust translation of Python's
+    /// `if isinstance(backend, GNOMESwitchBackend): backend.set_uinput(ui)`
+    /// in `KeyProcessor.run()`; the default (no-op) covers every other
+    /// backend.
+    fn set_virtual_keyboard(&mut self, _vk: Arc<Mutex<ps_input::VirtualKeyboard>>) {}
 }
 
 // ── GNOME ────────────────────────────────────────────────────────────────────
@@ -40,7 +48,7 @@ pub trait LayoutBackend {
 /// the desired list from dconf and *simulates* Super+Space through our virtual
 /// keyboard to cycle to the target index (port of `GNOMESwitchBackend`).
 pub struct GnomeBackend {
-    virtual_keyboard: Option<ps_input::VirtualKeyboard>,
+    virtual_keyboard: Option<Arc<Mutex<ps_input::VirtualKeyboard>>>,
     #[allow(dead_code)] // parity with Python: discovered and logged, not used yet
     ibus_addr: Option<String>,
     sources: Vec<String>,
@@ -62,7 +70,7 @@ impl GnomeBackend {
     }
 
     /// Python's `set_uinput` — GNOME switching injects Super+Space.
-    pub fn set_virtual_keyboard(&mut self, vk: ps_input::VirtualKeyboard) {
+    pub fn set_uinput(&mut self, vk: Arc<Mutex<ps_input::VirtualKeyboard>>) {
         self.virtual_keyboard = Some(vk);
     }
 
@@ -140,9 +148,10 @@ impl GnomeBackend {
     /// (Python `_simulate_switch`, same inter-event delays).
     fn simulate_switch(&mut self) {
         use ps_input::keycodes as kc;
-        let Some(vk) = self.virtual_keyboard.as_mut() else {
+        let Some(vk) = &self.virtual_keyboard else {
             return;
         };
+        let mut vk = vk.lock().unwrap();
         let delay = |ms| std::thread::sleep(Duration::from_millis(ms));
         let _ = vk.key(kc::KEY_LEFTMETA, 1);
         delay(10);
@@ -161,6 +170,10 @@ impl Default for GnomeBackend {
 }
 
 impl LayoutBackend for GnomeBackend {
+    fn set_virtual_keyboard(&mut self, vk: Arc<Mutex<ps_input::VirtualKeyboard>>) {
+        self.virtual_keyboard = Some(vk);
+    }
+
     fn get_current_index(&mut self) -> usize {
         self.read_current()
     }

@@ -47,6 +47,12 @@ impl VirtualKeyboard {
         self.device.get_syspath()
     }
 
+    /// Enumerate the `/dev/input/eventX` nodes the kernel created for this
+    /// device — where the compositor (and tests) read our injected events.
+    pub fn dev_nodes(&mut self) -> io::Result<evdev::uinput::DevNodesBlocking> {
+        self.device.enumerate_dev_nodes_blocking()
+    }
+
     /// Write one `EV_KEY` event + `SYN_REPORT` (Python: `write` + `syn`).
     pub fn key(&mut self, keycode: u16, value: i32) -> io::Result<()> {
         self.emit(&[InputEvent::new(EventType::KEY.0, keycode, value)])
@@ -112,5 +118,73 @@ mod tests {
             InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTSHIFT.0, 0),
         ])
         .unwrap();
+    }
+
+    /// End-to-end injection loopback: emit an event through the virtual
+    /// keyboard and read it back from the /dev/input node the kernel created
+    /// for it.  This is exactly what the compositor consumes — the Direct
+    /// Injection path delivering real input events.  Uses `KEY_FN` (no visible
+    /// effect in applications) to stay harmless on a live desktop.
+    #[test]
+    fn injected_events_reach_the_evdev_node() {
+        if !uinput_available() {
+            eprintln!("skipping: /dev/uinput unavailable");
+            return;
+        }
+        let mut keys: AttributeSet<KeyCode> = AttributeSet::new();
+        keys.insert(KeyCode::KEY_FN);
+        let mut vk = VirtualKeyboard::from_keys(keys).expect("uinput device");
+
+        // Find the /dev/input/eventX node the kernel created for this device.
+        let node_path = vk
+            .dev_nodes()
+            .expect("dev nodes")
+            .find_map(|n| n.ok())
+            .expect("at least one dev node");
+
+        // Open it as a reader (what any compositor/client would do).
+        // Retry briefly: udev applies the input-group permissions to a freshly
+        // created node asynchronously, so an immediate open can race it.
+        let mut reader = None;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            match Device::open(&node_path) {
+                Ok(d) => {
+                    reader = Some(d);
+                    break;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(err) => panic!("open {node_path:?} failed: {err}"),
+            }
+        }
+        let mut reader = reader.expect("device node became openable");
+
+        // Emit FN down/up and read them back (with a bounded wait).
+        vk.key(KeyCode::KEY_FN.0, 1).unwrap();
+        vk.key(KeyCode::KEY_FN.0, 0).unwrap();
+
+        let read_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut seen = Vec::new();
+        while seen.len() < 2 && std::time::Instant::now() < read_deadline {
+            match reader.fetch_events() {
+                Ok(events) => {
+                    for ev in events {
+                        if ev.event_type() == EventType::KEY {
+                            seen.push((ev.code(), ev.value()));
+                        }
+                    }
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(err) => panic!("read failed: {err}"),
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(
+            seen,
+            vec![(KeyCode::KEY_FN.0, 1), (KeyCode::KEY_FN.0, 0)],
+            "injected events must arrive on the device node"
+        );
     }
 }

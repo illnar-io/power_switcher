@@ -241,6 +241,18 @@ impl Processor {
         self.auto_paused
     }
 
+    /// Start paused (`ps daemon --no-auto` — hotkey-only mode).
+    /// NOTE: Python's `--no-auto` flag only changed the startup banner and was
+    /// never applied to the processor (upstream bug); the Rust daemon applies it.
+    pub fn set_auto_paused(&mut self, paused: bool) {
+        self.auto_paused = paused;
+    }
+
+    /// Number of loaded snippets (startup banner).
+    pub fn snippets_len(&self) -> usize {
+        self.snippets.len()
+    }
+
     pub fn front_app_class(&self) -> &str {
         &self.front_app_class
     }

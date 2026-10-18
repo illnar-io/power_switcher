@@ -1,0 +1,27 @@
+[package]
+name = "ps-daemon"
+description = "PowerSwitcher daemon: the `ps` binary (daemon, setup, debug)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ps"
+path = "src/main.rs"
+
+[dependencies]
+ps-core = { path = "../ps-core" }
+ps-input = { path = "../ps-input" }
+ps-layout = { path = "../ps-layout" }
+ps-focus = { path = "../ps-focus" }
+ps-engine = { path = "../ps-engine" }
+evdev = "0.13"
+clap = { version = "4", features = ["derive"] }
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+signal-hook = "0.3"
+log = "0.4"
+env_logger = "0.11"
+
+[dev-dependencies]
+tempfile = "3"
