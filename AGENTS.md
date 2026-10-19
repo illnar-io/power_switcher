@@ -86,6 +86,7 @@ Physical Keyboard(s)
 - **Device Filtering**: Only actual keyboards are grabbed. Mice and virtual bus devices are ignored based on their capabilities and names.
 - **Snippets**: Layout-independent matching via canonical form (RU→EN mapping + lowercase).
 - **Anti-Resonance**: Prevents A→B→A conversion loops by freezing auto for N seconds.
+- **No conversion without a real word**: if the typed word is not a known word of the current language, the re-mapped form must be a known word of the target language. N-gram noise alone used to flip keyboard mashing and vim keys (`hjkl` → `ролд`, `lrkf` → `дкла`); with the gate, random-string false positives drop from ~2.9% to ~0.44% while the golden 31,990-case corpus is unchanged.
 - **Flexible Undo**: Undo by word count or time window, not just single word.
 - **Active-window detection** (`focus.py`): each compositor is queried through its own interface (swaymsg / hyprctl / kdotool / xdotool). GNOME exposes nothing to clients, so per-app exceptions there need the bundled extension in `gnome-extension/`; the same extension also exposes keyboard-layout read/switch (`org.power_switcher.Layout`). Without it exceptions are inert and GNOME layout switching falls back to simulation (unreliable).
 - **Live layout sync**: a manual layout switch (Super+Space) is consumed by the compositor and never reaches the daemon, so the Rust daemon re-reads the *real* layout every 250 ms. On GNOME Wayland, dconf's `input-sources current` is stale and must not be trusted (it caused wrong-layout detection to silently do nothing).

@@ -378,7 +378,13 @@ impl LayoutSet {
             if !(target_known && best_gain >= required) {
                 return None;
             }
-        } else if best_gain < threshold {
+        } else if best_gain < threshold || !self.is_known_word(&best_converted, best) {
+            // The typed text is not a known word of the current language, so
+            // we only have n-gram plausibility to go on.  Require the re-mapped
+            // form to be an actual word of the target language: without this,
+            // keyboard mashing and vim keys ("hjkl", "lrkf") flip the layout
+            // and produce garbage.  The n-gram bonus for known words means the
+            // threshold still applies on top.
             return None;
         }
 
@@ -435,6 +441,28 @@ mod tests {
             ls.find_best_layout("ghbdtn", "en", DEFAULT_THRESHOLD, DEFAULT_MIN_WORD_LEN),
             Some("ru".into())
         );
+    }
+
+    #[test]
+    fn gibberish_is_not_converted() {
+        // Regression: n-gram noise alone used to convert keyboard mashing
+        // ("hjkl" → "ролд", "lrkf" → "дкла").  The re-mapped form must be a
+        // real word of the target language.
+        let mut ls = test_set();
+        for word in ["hjkl", "jkl;", "lrkf", "testtest", "dfgh", "wert", "vbn"] {
+            assert_eq!(
+                ls.find_best_layout(word, "en", DEFAULT_THRESHOLD, DEFAULT_MIN_WORD_LEN),
+                None,
+                "{word:?} must not convert"
+            );
+        }
+        for word in ["фыва", "олдж", "йцук", "ячсм"] {
+            assert_eq!(
+                ls.find_best_layout(word, "ru", DEFAULT_THRESHOLD, DEFAULT_MIN_WORD_LEN),
+                None,
+                "{word:?} must not convert"
+            );
+        }
     }
 
     #[test]

@@ -71,6 +71,29 @@ def test_dotted_email_not_converted():
     assert ls.find_best_layout("user@example.com", "en") is None
 
 
+# ── gibberish must not flip the layout ──────────────────────────────────
+
+
+def test_gibberish_is_not_converted():
+    # Regression: n-gram noise alone used to convert keyboard mashing
+    # ("hjkl" → "ролд", "lrkf" → "дкла").  The re-mapped form must be a real
+    # word of the target language.
+    ls = _make_set()
+    for word in ["hjkl", "jkl;", "lrkf", "testtest", "dfgh", "wert", "vbn"]:
+        assert ls.find_best_layout(word, "en") is None, word
+    for word in ["фыва", "олдж", "йцук", "ячсм"]:
+        assert ls.find_best_layout(word, "ru") is None, word
+
+
+def test_known_target_still_converts():
+    # The stricter gate must not break ordinary wrong-layout words.
+    ls = _make_set()
+    assert ls.find_best_layout("ghbdtn", "en") == "ru"   # привет
+    assert ls.find_best_layout("vtyz", "en") == "ru"     # меня
+    assert ls.find_best_layout("руддщ", "ru") == "en"    # hello
+    assert ls.find_best_layout("рщц", "ru") == "en"      # how
+
+
 def test_convert_en_to_ru():
     ls = _make_set()
     assert ls.convert("ghbdtn", "en", "ru") == "привет"

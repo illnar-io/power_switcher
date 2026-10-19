@@ -215,6 +215,10 @@ class LayoutSet:
         language is heavily favoured, so real words are rarely touched, while a
         converted form that is a known word of another language is strongly
         favoured, which recovers short words the n-grams alone miss.
+
+        A conversion is only accepted when the re-mapped form is a known word
+        of the target language: n-gram scores on keyboard mashing ("hjkl",
+        "lrkf") are noise and must not flip the layout.
         """
         if self.is_exception(word):
             return None
@@ -264,7 +268,11 @@ class LayoutSet:
             target_known = self.is_known_word(best_converted, best)
             if not (target_known and best_gain >= required):
                 return None
-        elif best_gain < threshold:
+        elif best_gain < threshold or not self.is_known_word(best_converted, best):
+            # The typed text is not a known word of the current language, so
+            # only n-gram plausibility is left.  Require the re-mapped form to
+            # be an actual word of the target language — otherwise keyboard
+            # mashing and vim keys ("hjkl", "lrkf") flip the layout for nothing.
             return None
 
         logger.debug(

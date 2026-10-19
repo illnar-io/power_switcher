@@ -27,7 +27,7 @@ model format, workspace layout, and "don't convert" regexes).
 | 4. Yofikator/autocorrect/model | ❌ not started |
 | 5. Native GUI | ❌ not started |
 
-Test counts: **Rust 160** (`cargo test --workspace`), **Python 136**
+Test counts: **Rust 161** (`cargo test --workspace`), **Python 138**
 (`PYTHONPATH=. python3 -m pytest -q`). Both must stay green; clippy/fmt clean.
 
 ### Phase 3 status (what works today)
@@ -263,3 +263,20 @@ bug, documented in the code).
    double-tap Shift after an auto conversion blacklists that word.  If a
    demo word stops converting, check `~/.config/power_switcher/words.json`
    (`python -m power_switcher words list`, `words remove <word>`).
+8. False-positive audit (2026-10-19, after the second live retest with 12
+   conversions): the trace converted `lrkf` → `дкла` — gibberish to
+   gibberish.  Root cause: for a word that is **not** in the current
+   language's vocabulary the decision used the n-gram gain alone
+   (`gain >= 2.5`), and n-gram scores are noise on keyboard mashing.
+   Fix (both engines, `find_best_layout`): an unknown source word must
+   re-map to a **known word of the target language** (same rule the
+   punctuated branch already used).  Measured before/after:
+   - golden corpus: 31,990 decisions unchanged, 0 mismatches (every
+     positive already had a known-word target);
+   - random-letter strings: 1,178 → 175 conversions per 40,000 (2.9% → 0.4%);
+   - vim/mashing keys `hjkl jkl; lrkf testtest dfgh wert vbn фыва олдж
+     йцук ячсм` now inert (`ghj` → `про` still converts);
+   - rare-word recall (frequency ranks 20k-50k) 34 → 24 of 53,141, i.e.
+     the gate costs 0.02%.
+   Tests: `gibberish_is_not_converted` (Rust + Python),
+   `test_known_target_still_converts`.
