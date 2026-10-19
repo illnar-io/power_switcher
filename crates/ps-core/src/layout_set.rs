@@ -11,7 +11,7 @@
 
 use std::collections::HashSet;
 use std::error::Error;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::layouts::LayoutMaps;
 use crate::ngram::{NGramDetector, Prepared};
@@ -63,6 +63,8 @@ pub struct LayoutSet {
     exceptions: HashSet<String>,
     /// Words learned automatically when a conversion is undone.
     learned: HashSet<String>,
+    /// `words.json` backing both sets; `None` → in-memory only.
+    words_path: Option<PathBuf>,
 }
 
 impl LayoutSet {
@@ -107,6 +109,7 @@ impl LayoutSet {
             maps,
             exceptions: HashSet::new(),
             learned: HashSet::new(),
+            words_path: words_path.map(Path::to_path_buf),
         };
         set.load_words(words_path);
         Ok(set)
@@ -147,6 +150,7 @@ impl LayoutSet {
             return;
         }
         self.exceptions.insert(word.to_lowercase());
+        self.save_words();
     }
 
     pub fn add_learned(&mut self, word: &str) {
@@ -154,6 +158,59 @@ impl LayoutSet {
             return;
         }
         self.learned.insert(word.to_lowercase());
+        self.save_words();
+    }
+
+    pub fn remove_exception(&mut self, word: &str) -> bool {
+        if self.exceptions.remove(&word.to_lowercase()) {
+            self.save_words();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn remove_learned(&mut self, word: &str) -> bool {
+        if self.learned.remove(&word.to_lowercase()) {
+            self.save_words();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn exceptions(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.exceptions.iter().cloned().collect();
+        v.sort();
+        v
+    }
+
+    pub fn learned_words(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.learned.iter().cloned().collect();
+        v.sort();
+        v
+    }
+
+    /// Persist `words.json`, exactly like Python's `LayoutSet._save_state`
+    /// (`{"exceptions": [...], "learned_words": [...]}`, sorted, pretty).
+    /// Write failures are logged and ignored — learning must never break typing.
+    pub fn save_words(&self) {
+        let Some(path) = &self.words_path else { return };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let payload = serde_json::json!({
+            "exceptions": self.exceptions(),
+            "learned_words": self.learned_words(),
+        });
+        match serde_json::to_string_pretty(&payload) {
+            Ok(text) => {
+                if let Err(err) = std::fs::write(path, text) {
+                    eprintln!("warning: failed to save {}: {err}", path.display());
+                }
+            }
+            Err(err) => eprintln!("warning: failed to serialise words: {err}"),
+        }
     }
 
     pub fn is_exception(&self, word: &str) -> bool {
@@ -483,5 +540,45 @@ mod tests {
             ls.find_best_layout("k.lb", "en", DEFAULT_THRESHOLD, DEFAULT_MIN_WORD_LEN),
             None
         );
+    }
+
+    #[test]
+    fn learned_words_are_persisted() {
+        // Regression: Rust kept learned words in memory only, so a word the
+        // user reverted came back on the next daemon start (Python persists).
+        let dir = std::env::temp_dir().join(format!(
+            "ps_core_learned_persist_{}.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&dir);
+        let mut ls = LayoutSet::create(
+            &["en", "ru"],
+            &manifest_dir().join("../../power_switcher/detection/profiles"),
+            &manifest_dir().join("data/layouts.json"),
+            Some(&dir),
+        )
+        .unwrap();
+        ls.add_learned("ghbdtn");
+        ls.add_exception("nj;t");
+
+        let raw = std::fs::read_to_string(&dir).unwrap();
+        let data: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(data["learned_words"], serde_json::json!(["ghbdtn"]));
+        assert_eq!(data["exceptions"], serde_json::json!(["nj;t"]));
+
+        // Reloading picks them up, so conversion is blocked after a restart.
+        let mut reloaded = LayoutSet::create(
+            &["en", "ru"],
+            &manifest_dir().join("../../power_switcher/detection/profiles"),
+            &manifest_dir().join("data/layouts.json"),
+            Some(&dir),
+        )
+        .unwrap();
+        assert!(reloaded.is_exception("ghbdtn"));
+        assert!(reloaded.is_exception("nj;t"));
+        assert!(reloaded.remove_learned("ghbdtn"));
+        assert!(!reloaded.is_exception("ghbdtn"));
+        assert!(!reloaded.remove_learned("ghbdtn"));
+        let _ = std::fs::remove_file(&dir);
     }
 }
