@@ -179,8 +179,8 @@ impl GnomeBackend {
 
     fn extension_index() -> Option<usize> {
         let out = Self::extension_call("GetCurrentIndex", &[])?;
-        // Reply: `(uint32 1,)` — the shared dconf parser extracts the digits.
-        Some(parse::parse_dconf_current(&out))
+        // Reply: `(uint32 1,)` — the gdbus parser extracts the whole number.
+        Some(parse::parse_gdbus_layout(&out))
     }
 
     fn extension_activate(index: usize) -> bool {
