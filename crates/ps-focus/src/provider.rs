@@ -374,6 +374,8 @@ mod tests {
     #[test]
     fn ttl_cache_hits_and_forces() {
         let mut p = ActiveWindowProvider::with_ttl(1.0);
+        // Deterministic: no real strategy may answer on a live desktop.
+        p.strategies.clear();
         // Simulate a populated cache by driving get_class_at through a fake
         // strategy result: instead, test the cache arithmetic directly.
         p.cached = "firefox".to_string();
