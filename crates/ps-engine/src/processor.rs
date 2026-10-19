@@ -53,8 +53,12 @@ impl RawEvent {
 /// An action the daemon must perform, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    /// Echo of a physical event through the virtual keyboard (immediate).
+    /// Echo of a physical `EV_KEY` event through the virtual keyboard.
     Emit { code: u16, value: i32 },
+    /// Echo of a non-key event with its original type (`EV_MSC`, `EV_SYN`, …)
+    /// — Python's `self._ui.write_event(ev)` keeps `ev.type`; emitting these
+    /// as `EV_KEY` would type the scancode as a phantom character.
+    Passthrough { type_: u16, code: u16, value: i32 },
     /// Injected keystroke: write the event, then wait `delay_ms` (Python's
     /// inter-event `asyncio.sleep` pacing).
     Inject {
@@ -272,7 +276,8 @@ impl Processor {
     /// Process one raw event at time `now`; returns the ordered action stream.
     pub fn on_event(&mut self, ev: RawEvent, now: f64) -> Vec<Action> {
         if ev.type_ != EV_KEY {
-            return vec![Action::Emit {
+            return vec![Action::Passthrough {
+                type_: ev.type_,
                 code: ev.code,
                 value: ev.value,
             }];

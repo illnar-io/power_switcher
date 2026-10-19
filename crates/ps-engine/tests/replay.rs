@@ -506,19 +506,48 @@ fn repeat_events_pass_through_without_processing() {
 }
 
 #[test]
-fn non_key_events_pass_through() {
+fn non_key_events_pass_through_with_their_type() {
+    // Regression from the first live run: EV_MSC/SCAN events were re-emitted
+    // as EV_KEY, so a scancode of 42 became KEY_3 (typed "3") and 46 became
+    // another phantom key.  The action must carry the original event type.
     let td = temp_dir();
     let mut proc = make_processor(&td, default_config());
     let now = 100.0;
     let actions = proc.on_event(
         RawEvent {
-            type_: 2,
-            code: 0,
-            value: 1,
+            type_: 4, // EV_MSC
+            code: 4,  // MSC_SCAN
+            value: 42,
         },
         now,
-    ); // EV_REL
-    assert_eq!(actions, vec![Action::Emit { code: 0, value: 1 }]);
+    );
+    assert_eq!(
+        actions,
+        vec![Action::Passthrough {
+            type_: 4,
+            code: 4,
+            value: 42,
+        }]
+    );
+
+    // EV_SYN is forwarded verbatim as well (the executor may drop it; uinput
+    // appends its own SYN_REPORT).
+    let actions = proc.on_event(
+        RawEvent {
+            type_: 0,
+            code: 0,
+            value: 0,
+        },
+        now,
+    );
+    assert_eq!(
+        actions,
+        vec![Action::Passthrough {
+            type_: 0,
+            code: 0,
+            value: 0,
+        }]
+    );
 }
 
 #[test]

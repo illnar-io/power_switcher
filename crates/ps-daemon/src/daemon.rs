@@ -50,6 +50,15 @@ impl Executor {
                     error!("uinput emit failed: {err}");
                 }
             }
+            Action::Passthrough { type_, code, value } => {
+                // Keep the original event type (EV_MSC/EV_SYN/…).  Writing it
+                // as EV_KEY would inject phantom keystrokes (found in the
+                // first live test: a scancode of 42 typed a "3").
+                let ev = evdev::InputEvent::new(*type_, *code, *value);
+                if let Err(err) = self.vk.lock().unwrap().emit(&[ev]) {
+                    error!("uinput passthrough failed: {err}");
+                }
+            }
             Action::Inject {
                 code,
                 value,
@@ -234,11 +243,18 @@ pub fn run(mut processor: Processor, backend: Box<dyn LayoutBackend>, trace: boo
 /// `--debug` trace: one line per event with the action summary.
 fn trace_event(ev: &RawEvent, actions: &[Action]) {
     use std::io::Write;
+    // EV_SYN (0) carries no information for us and doubled the trace size.
+    if ev.type_ == 0 {
+        return;
+    }
     let mut line = format!("EV type={} code={} value={}", ev.type_, ev.code, ev.value);
     for a in actions {
         match a {
             Action::Emit { code, value } => {
                 line.push_str(&format!(" | emit({code},{value})"));
+            }
+            Action::Passthrough { type_, code, value } => {
+                line.push_str(&format!(" | pass({type_},{code},{value})"));
             }
             Action::Inject {
                 code,

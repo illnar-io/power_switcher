@@ -187,4 +187,22 @@ mod tests {
             "injected events must arrive on the device node"
         );
     }
+
+    /// Non-key events are forwarded with their original type.  Regression:
+    /// the first live daemon run re-emitted EV_MSC/SCAN as EV_KEY, which typed
+    /// phantom characters ("3#").  The kernel must accept the passthrough even
+    /// though the device only declared key capabilities.
+    #[test]
+    fn non_key_passthrough_is_accepted() {
+        if !uinput_available() {
+            eprintln!("skipping: /dev/uinput unavailable");
+            return;
+        }
+        let mut keys: AttributeSet<KeyCode> = AttributeSet::new();
+        keys.insert(KeyCode::KEY_FN);
+        let mut vk = VirtualKeyboard::from_keys(keys).expect("uinput device");
+        // EV_MSC (4) / MSC_SCAN (4) with a scancode — same shape as the live run.
+        vk.emit(&[InputEvent::new(4, 4, 42)])
+            .expect("MSC passthrough must be accepted");
+    }
 }
