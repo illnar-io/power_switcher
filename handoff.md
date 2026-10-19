@@ -211,3 +211,32 @@ bug, documented in the code).
    ps-input (uinput → /dev/input node; note the udev permission race — open
    with retries). ydotoold present but its socket is dead → cannot inject
    synthetic keys externally; loopback test covers this instead.
+6. Live-test failure root cause (2026-10-19, fixed): the daemon synced its
+   layout from dconf `org.gnome.desktop.input-sources current`, which is
+   **deprecated and stale on GNOME Wayland** — it reported `ru` while the
+   real layout was `us`.  Every typed word was therefore decoded with the
+   wrong layout (`ghbdtn` → buffer `привет`, i.e. "valid Russian"), so
+   detection correctly saw nothing to fix and the daemon looked dead.
+   Two further facts were established experimentally on GNOME 51:
+   - injected `Super+Space` (and `XF86Keyboard`) does **not** trigger the
+     shell's built-in layout keybinding, although injected `Super+F12` does
+     fire a gsd custom keybinding;
+   - `org.gnome.Shell.Eval` is blocked, and `gsettings set … current N` is
+     ignored (writes the key, does not move the layout).
+   Working mechanism: the Fedora-preinstalled `g3kb-switch` CLI + its shell
+   extension (`g3kb-switch -p` / `-s <xkb-id>`), or our own bundled
+   extension (`org.power_switcher.Layout.GetCurrentIndex` /
+   `ActivateInputSource`) which requires one logout/login to load.
+   Environment changes made for the live session (user-level, reversible):
+   `gnome-extensions` → `g3kb-switch@g3kb-switch.org` enabled, and
+   `org.gnome.shell disable-extension-version-validation = true` (the
+   packaged extension advertises shell-version ≤49; it works on 51).
+   Rust changes: GNOME backend auto-detects g3kb-switch → extension →
+   simulation (with a loud warning); `get_current_index`/`set_layout` use
+   the real mechanism; the daemon now polls the real layout every 250 ms and
+   updates the processor (fixes manual Super+Space switches mid-session).
+   Added an env-lock to the detector tests (parallel `set_var` race).
+   Not ported to the Python daemon (Rust is the live path; the Python
+   backend keeps the old, broken dconf/Super+Space logic).
+   Verified live: `layout control via g3kb-switch`, `Initial layout synced
+   to en`, and a direct backend probe switching 0 → 1 → 0.

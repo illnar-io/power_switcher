@@ -20,6 +20,8 @@ const GDBUS_TIMEOUT: Duration = Duration::from_secs(2);
 const GDBUS_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 const SWAYMSG_TIMEOUT: Duration = Duration::from_secs(1);
 const HYPRCTL_TIMEOUT: Duration = Duration::from_secs(1);
+/// `g3kb-switch` is a tiny CLI; a failed call must not stall the event loop.
+const G3KB_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Delay between simulated Super+Space presses (GNOME backend).
 pub const SUPER_SPACE_STEP_DELAY: Duration = Duration::from_millis(50);
@@ -52,20 +54,67 @@ pub struct GnomeBackend {
     #[allow(dead_code)] // parity with Python: discovered and logged, not used yet
     ibus_addr: Option<String>,
     sources: Vec<String>,
+    /// How this session can actually change the input source.
+    switch: GnomeSwitch,
 }
+
+/// GNOME 45+ blocks every "just set it" path for the keyboard layout:
+/// `org.gnome.Shell.Eval` is disabled, and the dconf key
+/// `org.gnome.desktop.input-sources current` is deprecated *and stale* on
+/// Wayland (it may keep reporting a layout that is not active — the original
+/// live-test failure).  Injected Super+Space does not trigger the shell's
+/// built-in keybinding either.  So we discover, once at startup, one of the
+/// working mechanisms and record it here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GnomeSwitch {
+    /// `g3kb-switch` talks to the `g3kb-switch` shell extension over D-Bus.
+    /// Preinstalled on Fedora; needs its helper extension enabled.
+    G3kb,
+    /// Our own bundled extension (`gnome-extension/`), which exposes
+    /// `org.power_switcher.Layout` from inside the shell.
+    Extension,
+    /// Last resort: cycle with simulated Super+Space.  Works on X11 and old
+    /// GNOME releases; silently does nothing on GNOME 45+.
+    Simulated,
+}
+
+impl GnomeSwitch {
+    fn describe(self) -> &'static str {
+        match self {
+            Self::G3kb => "g3kb-switch",
+            Self::Extension => "PowerSwitcher shell extension",
+            Self::Simulated => "simulated Super+Space (unreliable on GNOME 45+)",
+        }
+    }
+}
+
+/// The PowerSwitcher extension's layout interface (see `gnome-extension/`).
+const EXT_DEST: &str = "org.power_switcher.Focus";
+const EXT_LAYOUT_PATH: &str = "/org/power_switcher/Layout";
+const EXT_LAYOUT_IFACE: &str = "org.power_switcher.Layout";
 
 impl GnomeBackend {
     pub fn new() -> Self {
         let ibus_addr = Self::discover_ibus_addr();
         let sources = Self::read_sources();
+        let switch = Self::detect_switch(&sources);
         info!(
-            "GNOMESwitchBackend: IBus={:?}, Sources={:?}",
-            ibus_addr, sources
+            "GNOMESwitchBackend: IBus={:?}, Sources={:?}, layout control via {}",
+            ibus_addr,
+            sources,
+            switch.describe()
         );
+        if switch == GnomeSwitch::Simulated {
+            warn!(
+                "GNOMESwitchBackend: install/enable g3kb-switch or the bundled \
+                 PowerSwitcher extension — simulated Super+Space is ignored by GNOME 45+"
+            );
+        }
         Self {
             virtual_keyboard: None,
             ibus_addr,
             sources,
+            switch,
         }
     }
 
@@ -93,6 +142,65 @@ impl GnomeBackend {
         vec!["us".to_string(), "ru".to_string()]
     }
 
+    /// Cheap "is it installed and does it answer" probe for g3kb-switch.
+    /// Returns the *current* xkb id, which also validates the reply against
+    /// the configured sources (a broken extension prints an error instead).
+    fn g3kb_id(sources: &[String]) -> Option<String> {
+        let out = run_stdout("g3kb-switch", &["-p"], G3KB_TIMEOUT)?;
+        let id = out.trim();
+        if !id.is_empty() && sources.iter().any(|s| s == id) {
+            Some(id.to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Call a method on our bundled extension's layout interface.
+    fn extension_call(method: &str, args: &[&str]) -> Option<String> {
+        let mut call = vec![
+            "call",
+            "--session",
+            "--dest",
+            EXT_DEST,
+            "--object-path",
+            EXT_LAYOUT_PATH,
+            "--method",
+        ];
+        let method = format!("{EXT_LAYOUT_IFACE}.{method}");
+        call.push(&method);
+        call.extend_from_slice(args);
+        let captured = run_capture("gdbus", &call, GDBUS_TIMEOUT)?;
+        if captured.success == Some(true) {
+            Some(captured.stdout)
+        } else {
+            None
+        }
+    }
+
+    fn extension_index() -> Option<usize> {
+        let out = Self::extension_call("GetCurrentIndex", &[])?;
+        // Reply: `(uint32 1,)` — the shared dconf parser extracts the digits.
+        Some(parse::parse_dconf_current(&out))
+    }
+
+    fn extension_activate(index: usize) -> bool {
+        let index = index.to_string();
+        Self::extension_call("ActivateInputSource", &[&index])
+            .map(|out| out.contains("true"))
+            .unwrap_or(false)
+    }
+
+    fn detect_switch(sources: &[String]) -> GnomeSwitch {
+        if Self::g3kb_id(sources).is_some() {
+            return GnomeSwitch::G3kb;
+        }
+        if Self::extension_index().is_some() {
+            return GnomeSwitch::Extension;
+        }
+        GnomeSwitch::Simulated
+    }
+
+    /// dconf fallback (stale on Wayland; only used when nothing better works).
     fn read_current(&self) -> usize {
         if let Some(out) = run_stdout(
             "dconf",
@@ -161,6 +269,24 @@ impl GnomeBackend {
         delay(10);
         let _ = vk.key(kc::KEY_LEFTMETA, 0);
     }
+
+    /// Cycle with simulated Super+Space until `index` is reported current.
+    /// Only a fallback: GNOME 45+ ignores synthetic input for its built-in
+    /// keybindings, so this usually does nothing there.
+    fn simulate_to(&mut self, index: usize) {
+        let current = self.read_current();
+        if current == index {
+            return;
+        }
+        // Steps forward in the cycle to reach `index`.
+        let steps =
+            (index + self.sources.len() - current % self.sources.len()) % self.sources.len();
+        info!("GNOMESwitchBackend: Simulating {steps}x Super+Space to reach layout index {index}");
+        for _ in 0..steps {
+            self.simulate_switch();
+            std::thread::sleep(SUPER_SPACE_STEP_DELAY);
+        }
+    }
 }
 
 impl Default for GnomeBackend {
@@ -175,7 +301,22 @@ impl LayoutBackend for GnomeBackend {
     }
 
     fn get_current_index(&mut self) -> usize {
-        self.read_current()
+        match self.switch {
+            GnomeSwitch::G3kb => {
+                if let Some(id) = Self::g3kb_id(&self.sources) {
+                    if let Some(index) = self.sources.iter().position(|s| *s == id) {
+                        return index;
+                    }
+                }
+                // g3kb-switch answered but not with a known source (or died):
+                // try the bundled extension, then the (possibly stale) dconf.
+                Self::extension_index().unwrap_or_else(|| self.read_current())
+            }
+            GnomeSwitch::Extension => {
+                Self::extension_index().unwrap_or_else(|| self.read_current())
+            }
+            GnomeSwitch::Simulated => self.read_current(),
+        }
     }
 
     fn get_layout_count(&mut self) -> usize {
@@ -186,17 +327,33 @@ impl LayoutBackend for GnomeBackend {
         if index >= self.sources.len() {
             return;
         }
-        let current = self.get_current_index();
-        if current == index {
-            return;
-        }
-        // Steps forward in the cycle to reach `index`.
-        let steps =
-            (index + self.sources.len() - current % self.sources.len()) % self.sources.len();
-        info!("GNOMESwitchBackend: Simulating {steps}x Super+Space to reach layout index {index}");
-        for _ in 0..steps {
-            self.simulate_switch();
-            std::thread::sleep(SUPER_SPACE_STEP_DELAY);
+        match self.switch {
+            GnomeSwitch::G3kb => {
+                let id = self.sources[index].clone();
+                let ok = run_status("g3kb-switch", &["-s", &id], G3KB_TIMEOUT).unwrap_or(false);
+                if ok {
+                    info!("GNOMESwitchBackend: g3kb-switch -s {id} (index {index})");
+                    return;
+                }
+                warn!("GNOMESwitchBackend: g3kb-switch -s {id} failed; falling back");
+                if Self::extension_activate(index) {
+                    info!("GNOMESwitchBackend: extension activated input source {index}");
+                    return;
+                }
+                self.simulate_to(index);
+            }
+            GnomeSwitch::Extension => {
+                if Self::extension_activate(index) {
+                    info!("GNOMESwitchBackend: extension activated input source {index}");
+                    return;
+                }
+                warn!(
+                    "GNOMESwitchBackend: extension ActivateInputSource({index}) failed; \
+                     falling back to Super+Space"
+                );
+                self.simulate_to(index);
+            }
+            GnomeSwitch::Simulated => self.simulate_to(index),
         }
     }
 

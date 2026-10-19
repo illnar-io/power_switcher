@@ -14,7 +14,7 @@
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use log::{error, info};
 
@@ -24,6 +24,9 @@ use ps_layout::LayoutBackend;
 
 /// Idle poll interval of the main loop (also the shutdown latency bound).
 const LOOP_TICK: Duration = Duration::from_millis(50);
+/// How often the real compositor layout is re-read (manual switches are
+/// invisible to the daemon: Super+Space is consumed by the compositor).
+const LAYOUT_SYNC_INTERVAL: Duration = Duration::from_millis(250);
 /// Reader-thread idle sleep when no events are available.
 const READER_TICK: Duration = Duration::from_millis(1);
 
@@ -213,7 +216,23 @@ pub fn run(mut processor: Processor, backend: Box<dyn LayoutBackend>, trace: boo
 
     // ── main loop ────────────────────────────────────────────────────────
     let mut executor = Executor { vk, backend };
+    let mut last_layout_sync = Instant::now();
     'main: loop {
+        // Manual layout switches (Super+Space) never reach us — the
+        // compositor consumes them.  Re-read the *real* layout periodically,
+        // otherwise every word is decoded with a stale layout and detection
+        // silently does the wrong thing.
+        if last_layout_sync.elapsed() >= LAYOUT_SYNC_INTERVAL {
+            last_layout_sync = Instant::now();
+            let index = executor.backend.get_current_index();
+            if let Some(layout) = processor.layout_set.layouts.get(index).cloned() {
+                if processor.layout() != layout {
+                    info!("AUDIT: external layout change → {layout}");
+                    processor.set_layout_state(&layout);
+                }
+            }
+        }
+
         match rx.recv_timeout(LOOP_TICK) {
             Ok(ev) => {
                 let now = system_now();

@@ -1,8 +1,8 @@
 {
   "uuid": "power-switcher-focus@powerswitcher",
-  "name": "PowerSwitcher Focus",
-  "description": "Exposes the focused window's application id over the session bus so PowerSwitcher can disable auto-correction in chosen applications (terminals, IDEs, games).",
+  "name": "PowerSwitcher Helper",
+  "description": "Exposes the focused window's application id and the keyboard input sources over the session bus. PowerSwitcher uses this for per-app exceptions and for switching layouts on Wayland, where the shell blocks all other programmatic APIs.",
   "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
   "url": "https://github.com/",
-  "version": 1
+  "version": 2
 }

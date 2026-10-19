@@ -82,12 +82,13 @@ Physical Keyboard(s)
 
 - **Direct Injection**: We no longer use `ydotool`. We find the (keycode, shift) pair for each character in the target layout using `LayoutSet.char_to_keycode()` and emit them via our own `UInput` device.
 - **Multi-Layout**: The system uses `LayoutSet` instead of `LayoutPair`. It supports any number of layouts configured in `config.toml`.
-- **Compositor Backends**: Supports GNOME (UInput Super+Space), KDE (D-Bus), Sway (IPC), and Hyprland (IPC).
+- **Compositor Backends**: Supports GNOME (real layout read/switch through `g3kb-switch` or the bundled shell extension; simulated Super+Space is only a last-resort fallback — GNOME 45+ ignores it), KDE (D-Bus), Sway (IPC), and Hyprland (IPC).
 - **Device Filtering**: Only actual keyboards are grabbed. Mice and virtual bus devices are ignored based on their capabilities and names.
 - **Snippets**: Layout-independent matching via canonical form (RU→EN mapping + lowercase).
 - **Anti-Resonance**: Prevents A→B→A conversion loops by freezing auto for N seconds.
 - **Flexible Undo**: Undo by word count or time window, not just single word.
-- **Active-window detection** (`focus.py`): each compositor is queried through its own interface (swaymsg / hyprctl / kdotool / xdotool). GNOME exposes nothing to clients, so per-app exceptions there need the bundled extension in `gnome-extension/`; without it exceptions are inert but harmless.
+- **Active-window detection** (`focus.py`): each compositor is queried through its own interface (swaymsg / hyprctl / kdotool / xdotool). GNOME exposes nothing to clients, so per-app exceptions there need the bundled extension in `gnome-extension/`; the same extension also exposes keyboard-layout read/switch (`org.power_switcher.Layout`). Without it exceptions are inert and GNOME layout switching falls back to simulation (unreliable).
+- **Live layout sync**: a manual layout switch (Super+Space) is consumed by the compositor and never reaches the daemon, so the Rust daemon re-reads the *real* layout every 250 ms. On GNOME Wayland, dconf's `input-sources current` is stale and must not be trusted (it caused wrong-layout detection to silently do nothing).
 - **State file separation**: per-app modes live in `~/.config/power_switcher/exceptions.json`, learned/word exceptions in `words.json`, counters in `stats.json` — they must never share a file.
 - **Detection profiles** are generated from the reference word-frequency lists in `data/frequency/` (see `docs/REVERSE_ENGINEERING.md`).
 

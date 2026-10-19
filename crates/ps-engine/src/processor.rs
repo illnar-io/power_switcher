@@ -241,6 +241,11 @@ impl Processor {
         }
     }
 
+    /// Currently assumed layout key (`"en"`, `"ru"`, …).
+    pub fn layout(&self) -> &str {
+        &self.layout
+    }
+
     pub fn auto_paused(&self) -> bool {
         self.auto_paused
     }

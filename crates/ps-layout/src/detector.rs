@@ -70,9 +70,15 @@ pub fn detect_layout_backend() -> Result<Box<dyn LayoutBackend>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// The detector reads process-global environment variables; concurrent
+    /// tests would otherwise observe each other's `set_var` calls.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn sway_env_wins() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // In an environment with SWAYSOCK set, detection must return Sway
         // regardless of XDG_CURRENT_DESKTOP (matches the Python order).
         std::env::set_var("SWAYSOCK", "/run/user/1000/sway-ipc.sock");
@@ -84,6 +90,7 @@ mod tests {
 
     #[test]
     fn hyprland_env_wins_when_no_sway() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("SWAYSOCK");
         std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "sig_123");
         let backend = detect_layout_backend().expect("hyprland detected");
@@ -93,6 +100,7 @@ mod tests {
 
     #[test]
     fn no_backend_is_an_error() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Clean environment, no GNOME/KDE tools: detection must fail with the
         // Python error message shape.
         std::env::remove_var("SWAYSOCK");
