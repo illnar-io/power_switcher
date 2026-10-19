@@ -41,6 +41,9 @@ class Config:
     manual_only_last_word: bool = False
     sound_enabled:       bool  = True
     self_learning:       bool  = True
+    # Legacy Caramba gesture: a lone Shift tap switches the layout.
+    # Off by default — desktops already bind Super+Space for that.
+    shift_tap_switch_layout: bool = False
 
     # Undo
     undo_words:    int   = 0
@@ -81,6 +84,9 @@ class Config:
         )
         c.sound_enabled    = g.get("sound_enabled",     c.sound_enabled)
         c.self_learning    = g.get("self_learning",     c.self_learning)
+        c.shift_tap_switch_layout = g.get(
+            "shift_tap_switch_layout", c.shift_tap_switch_layout
+        )
         c.snippets_file    = g.get("snippets_file",     c.snippets_file)
         c.exceptions_file  = g.get("exceptions_file",   c.exceptions_file)
         c.words_file       = g.get("words_file",        c.words_file)

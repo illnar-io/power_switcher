@@ -136,6 +136,7 @@ fn cmd_daemon(config_path: &str, no_auto: bool, trace: bool) -> ! {
         manual_only_last_word: cfg.manual_only_last_word,
         sound_enabled: cfg.sound_enabled,
         self_learning: cfg.self_learning,
+        shift_tap_switch_layout: cfg.shift_tap_switch_layout,
         key_buffer_max_len: 100,
     };
 
@@ -166,6 +167,14 @@ fn cmd_daemon(config_path: &str, no_auto: bool, trace: bool) -> ! {
         cfg.undo_words, cfg.undo_seconds
     );
     println!("Hotkeys:      L+R Shift = pause/resume, double Shift = convert/undo");
+    println!(
+        "Layout switch: {}",
+        if cfg.shift_tap_switch_layout {
+            "lone Shift tap (legacy)"
+        } else {
+            "desktop shortcut (Super+Space)"
+        }
+    );
 
     daemon::run(processor, backend, trace)
 }
@@ -188,6 +197,10 @@ lr_shift_pause = true
 manual_only_last_word = false
 sound_enabled = true
 self_learning = true
+
+# A lone Shift tap switching the layout (legacy Caramba gesture).
+# Off by default: use the desktop's Super+Space instead.
+shift_tap_switch_layout = false
 
 [detection]
 threshold = 2.5

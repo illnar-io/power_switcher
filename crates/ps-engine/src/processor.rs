@@ -102,6 +102,14 @@ pub struct ProcessorConfig {
     pub manual_only_last_word: bool,
     pub sound_enabled: bool,
     pub self_learning: bool,
+    /// Caramba-style "quick tap of Shift switches layout".
+    ///
+    /// **Off by default**: a lone LShift/RShift tap is a plain modifier press
+    /// and must not touch the layout — desktop environments already bind
+    /// `Super+Space` for that, and stray taps while typing turned into
+    /// unwanted layout flips.  The double-tap gesture (convert/undo) is
+    /// unaffected.
+    pub shift_tap_switch_layout: bool,
     // KeyBuffer capacity (Python `KeyBuffer(max_len=100)`).
     pub key_buffer_max_len: usize,
 }
@@ -129,6 +137,7 @@ impl Default for ProcessorConfig {
             manual_only_last_word: false,
             sound_enabled: true,
             self_learning: true,
+            shift_tap_switch_layout: false,
             key_buffer_max_len: 100,
         }
     }
@@ -340,7 +349,9 @@ impl Processor {
                     let conv = self.do_manual_convert(now);
                     actions.extend(conv);
                 }
-                Some(ShiftAction::SingleShift) if self.pressed.is_empty() => {
+                Some(ShiftAction::SingleShift)
+                    if self.pressed.is_empty() && self.config.shift_tap_switch_layout =>
+                {
                     let layouts = self.layout_set.layouts.clone();
                     if kc == KEY_LEFTSHIFT && !layouts.is_empty() {
                         actions.extend(self.set_layout(&layouts[0], now));

@@ -265,9 +265,11 @@ fn double_shift_converts_last_word_back() {
 }
 
 #[test]
-fn single_shift_toggles_layout() {
+fn single_shift_toggles_layout_when_legacy_gesture_enabled() {
     let td = temp_dir();
-    let mut proc = make_processor(&td, default_config());
+    let mut config = default_config();
+    config.shift_tap_switch_layout = true;
+    let mut proc = make_processor(&td, config);
     let mut now = 100.0;
 
     // Clean single tap of LEFT shift → layouts[0] ("en").
@@ -287,6 +289,31 @@ fn single_shift_toggles_layout() {
     let actions: Vec<Action> = actions.into_iter().chain(actions2).collect();
     assert_eq!(set_layouts(&actions), vec![1]);
     assert_eq!(proc.current_layout(), "ru");
+}
+
+#[test]
+fn single_shift_tap_is_inert_by_default() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config());
+    let mut now = 100.0;
+
+    // Default config: a lone Shift tap is a plain modifier press — it must not
+    // switch the layout (the desktop owns Super+Space) and must not make noise.
+    for kc in [KEY_LEFTSHIFT, KEY_RIGHTSHIFT, KEY_LEFTSHIFT] {
+        now += 0.5;
+        let actions = proc.on_event(RawEvent::key(kc, 1), now);
+        let actions2 = proc.on_event(RawEvent::key(kc, 0), now + 0.05);
+        let all: Vec<Action> = actions.into_iter().chain(actions2).collect();
+        assert!(
+            set_layouts(&all).is_empty(),
+            "lone shift tap must not switch layout: {all:?}"
+        );
+        assert!(
+            !all.iter().any(|a| matches!(a, Action::Sound { .. })),
+            "lone shift tap must stay silent: {all:?}"
+        );
+    }
+    assert_eq!(proc.current_layout(), "en");
 }
 
 #[test]

@@ -60,6 +60,8 @@ class KeyProcessor:
         manual_only_last_word: bool = False,
         sound_enabled: bool = True,
         self_learning: bool = True,
+        # A lone Shift tap switches the layout (legacy Caramba gesture).
+        shift_tap_switch_layout: bool = False,
         # Stats
         stats: Stats | None = None,
         # Exceptions
@@ -98,6 +100,7 @@ class KeyProcessor:
         self._manual_only_last_word = manual_only_last_word
         self._sound_enabled = sound_enabled
         self._self_learning = self_learning
+        self._shift_tap_switch_layout = shift_tap_switch_layout
 
         # Statistics
         self.stats = stats if stats is not None else Stats()
@@ -312,7 +315,11 @@ class KeyProcessor:
                 return
             if action == "double_shift":
                 await self._do_manual_convert()
-            elif action == "single_shift" and not self._pressed:
+            elif (
+                action == "single_shift"
+                and not self._pressed
+                and self._shift_tap_switch_layout
+            ):
                 if kc == e.KEY_LEFTSHIFT and len(self.layout_set.layouts) > 0:
                     self._set_layout(self.layout_set.layouts[0])
                     self._sentence.clear()

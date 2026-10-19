@@ -134,8 +134,10 @@ def test_lr_shift_does_not_trigger_manual_convert(tmp_state):
     assert called == [1]
 
 
-def test_single_shift_toggles_layout(tmp_state):
-    proc = make_processor(tmp_state, current_layout="ru")
+def test_single_shift_toggles_layout_when_legacy_gesture_enabled(tmp_state):
+    proc = make_processor(
+        tmp_state, current_layout="ru", shift_tap_switch_layout=True
+    )
 
     async def scenario():
         await proc._on_event(_event(e.KEY_LEFTSHIFT, 1))
@@ -143,6 +145,21 @@ def test_single_shift_toggles_layout(tmp_state):
 
     asyncio.run(scenario())
     assert proc.layout_backend.index == 0  # layouts[0] == "en"
+
+
+def test_single_shift_tap_is_inert_by_default(tmp_state):
+    proc = make_processor(tmp_state, current_layout="en")
+
+    async def scenario():
+        await proc._on_event(_event(e.KEY_LEFTSHIFT, 1))
+        await proc._on_event(_event(e.KEY_LEFTSHIFT, 0))
+        await proc._on_event(_event(e.KEY_RIGHTSHIFT, 1))
+        await proc._on_event(_event(e.KEY_RIGHTSHIFT, 0))
+
+    asyncio.run(scenario())
+    # Desktop owns Super+Space: a lone Shift tap must not touch the layout.
+    assert proc.layout_backend.index == 0
+    assert proc.layout_backend.calls == []
 
 
 # ── "don't correct after layout change" guard ───────────────────────────

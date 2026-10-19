@@ -27,7 +27,7 @@ model format, workspace layout, and "don't convert" regexes).
 | 4. Yofikator/autocorrect/model | ❌ not started |
 | 5. Native GUI | ❌ not started |
 
-Test counts: **Rust 157** (`cargo test --workspace`), **Python 135**
+Test counts: **Rust 160** (`cargo test --workspace`), **Python 136**
 (`PYTHONPATH=. python3 -m pytest -q`). Both must stay green; clippy/fmt clean.
 
 ### Phase 3 status (what works today)
@@ -240,3 +240,26 @@ bug, documented in the code).
    backend keeps the old, broken dconf/Super+Space logic).
    Verified live: `layout control via g3kb-switch`, `Initial layout synced
    to en`, and a direct backend probe switching 0 → 1 → 0.
+7. Live retest worked (2026-10-19): 6 auto conversions + 1 undo, 28 chars
+   retyped; stats.json shared with the Python CLI (`stats show` agreed).
+   Two follow-ups from the trace:
+   - **Lone Shift tap no longer switches layout.** Every individual L/R
+     Shift release produced `set_layout(...)` (visible as 0.5 s layout
+     flapping at the end of the trace) and fought the user's `Super+Space`.
+     The gesture is now opt-in: `shift_tap_switch_layout` (default `false`)
+     in `[general]`, wired through `ProcessorConfig`, the daemon `Config`,
+     `ps setup`, the banner (`Layout switch: desktop shortcut (Super+Space)`)
+     and the Python `KeyProcessor`/`Config`. Double-tap Shift is unchanged.
+     Tests: `single_shift_tap_is_inert_by_default` (Rust + Python) and the
+     legacy test now sets the flag.
+   - **Learned words were not persisted in Rust.** `LayoutSet::add_learned`
+     updated an in-memory set only, so `AUDIT: learned word 'ghbdtn'`
+     vanished on shutdown (Python writes `words.json`). `LayoutSet` now
+     remembers its `words.json` path and `add_exception` / `add_learned`
+     (plus new `remove_exception` / `remove_learned` / `exceptions()` /
+     `learned_words()`) save immediately. Regression test
+     `learned_words_are_persisted`.
+   Note for the next session: because "undo → learn" is by design, a stray
+   double-tap Shift after an auto conversion blacklists that word.  If a
+   demo word stops converting, check `~/.config/power_switcher/words.json`
+   (`python -m power_switcher words list`, `words remove <word>`).

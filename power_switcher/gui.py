@@ -335,6 +335,10 @@ class SettingsTab(ttk.Frame):
         ttk.Checkbutton(scroll_frame, text="L+R Shift toggles auto-detect pause", variable=self.lr_shift_pause_var).grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=2)
         row += 1
 
+        self.shift_tap_switch_var = tk.BooleanVar(value=self.config.shift_tap_switch_layout)
+        ttk.Checkbutton(scroll_frame, text="Lone Shift tap switches layout (legacy; prefer Super+Space)", variable=self.shift_tap_switch_var).grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=2)
+        row += 1
+
         self.manual_only_last_word_var = tk.BooleanVar(value=self.config.manual_only_last_word)
         ttk.Checkbutton(scroll_frame, text="Manual convert: only the last word", variable=self.manual_only_last_word_var).grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=2)
         row += 1
@@ -390,6 +394,7 @@ class SettingsTab(ttk.Frame):
             self.config.arrows_cancel = self.arrows_cancel_var.get()
             self.config.live_fix_enabled = self.live_fix_var.get()
             self.config.lr_shift_pause = self.lr_shift_pause_var.get()
+            self.config.shift_tap_switch_layout = self.shift_tap_switch_var.get()
             self.config.manual_only_last_word = self.manual_only_last_word_var.get()
             self.config.self_learning = self.self_learning_var.get()
             self.config.sound_enabled = self.sound_enabled_var.get()
@@ -413,6 +418,7 @@ class SettingsTab(ttk.Frame):
             f"arrows_cancel = {str(c.arrows_cancel).lower()}",
             f"live_fix_enabled = {str(c.live_fix_enabled).lower()}",
             f"lr_shift_pause = {str(c.lr_shift_pause).lower()}",
+            f"shift_tap_switch_layout = {str(c.shift_tap_switch_layout).lower()}",
             f"manual_only_last_word = {str(c.manual_only_last_word).lower()}",
             f"self_learning = {str(c.self_learning).lower()}",
             f"sound_enabled = {str(c.sound_enabled).lower()}",

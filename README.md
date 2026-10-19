@@ -67,9 +67,8 @@ python -m power_switcher daemon --verbose
 | Hotkey | Action |
 |--------|--------|
 | Double-tap Shift | Convert current sentence + switch layout (or undo the last conversion) |
-| Single Left Shift | Switch to first layout |
-| Single Right Shift | Switch to second layout |
 | **Left + Right Shift together** | Pause / resume auto-detection |
+| Single Left/Right Shift | *Legacy, off by default* — switches to layout 1/2 (`shift_tap_switch_layout = true`). Use your desktop's `Super+Space` instead. |
 
 ## Configuration
 
@@ -87,6 +86,7 @@ lr_shift_pause   = true            # L+R Shift pauses auto-detection
 manual_only_last_word = false      # Manual convert touches only the last word
 self_learning    = true            # Learn words you un-convert
 sound_enabled    = true            # Play a sound on conversion
+shift_tap_switch_layout = false    # Lone Shift tap switches layout (legacy; desktop owns Super+Space)
 no_correct_after_switch = 1.5      # Seconds to leave alone after a layout switch (0=off)
 
 [detection]

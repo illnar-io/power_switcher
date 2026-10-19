@@ -42,6 +42,9 @@ pub struct Config {
     pub manual_only_last_word: bool,
     pub sound_enabled: bool,
     pub self_learning: bool,
+    /// A lone Shift tap switches the layout (legacy Caramba gesture).
+    /// Off by default — the desktop binds `Super+Space` for that.
+    pub shift_tap_switch_layout: bool,
 
     // Undo
     pub undo_words: usize,
@@ -80,6 +83,7 @@ impl Default for Config {
             manual_only_last_word: false,
             sound_enabled: true,
             self_learning: true,
+            shift_tap_switch_layout: false,
             undo_words: 0,
             undo_seconds: 3.0,
             snippets_file: String::new(),
@@ -121,6 +125,7 @@ struct GeneralSection {
     manual_only_last_word: Option<bool>,
     sound_enabled: Option<bool>,
     self_learning: Option<bool>,
+    shift_tap_switch_layout: Option<bool>,
     snippets_file: Option<String>,
     exceptions_file: Option<String>,
     words_file: Option<String>,
@@ -206,6 +211,9 @@ impl Config {
         }
         if let Some(v) = g.self_learning {
             c.self_learning = v;
+        }
+        if let Some(v) = g.shift_tap_switch_layout {
+            c.shift_tap_switch_layout = v;
         }
         if let Some(v) = g.snippets_file {
             c.snippets_file = v;
@@ -307,6 +315,10 @@ mod tests {
         assert_eq!(c.threshold, 2.5);
         assert_eq!(c.no_correct_after_switch, 1.5);
         assert!(c.trigger_punctuation);
+        assert!(
+            !c.shift_tap_switch_layout,
+            "lone Shift tap must not switch layouts by default"
+        );
     }
 
     #[test]
@@ -322,6 +334,7 @@ default_layout = "de"
 developer_mode = true
 no_correct_after_switch = 2.0
 sound_enabled = false
+shift_tap_switch_layout = true
 
 [detection]
 threshold = 3.0
@@ -344,6 +357,7 @@ seconds = 5.0
         assert!(c.developer_mode);
         assert_eq!(c.no_correct_after_switch, 2.0);
         assert!(!c.sound_enabled);
+        assert!(c.shift_tap_switch_layout);
         assert_eq!(c.threshold, 3.0);
         assert_eq!(c.min_word_len, 4);
         assert!(!c.trigger_punctuation);

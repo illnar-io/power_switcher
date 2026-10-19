@@ -70,6 +70,7 @@ def daemon(config, verbose, no_auto):
         manual_only_last_word=cfg.manual_only_last_word,
         sound_enabled=cfg.sound_enabled,
         self_learning=cfg.self_learning,
+        shift_tap_switch_layout=cfg.shift_tap_switch_layout,
         # Stats
         stats=Stats.load(stats_path),
         # Exceptions
@@ -82,6 +83,10 @@ def daemon(config, verbose, no_auto):
     click.echo(f"Snippets:     {len(processor._snippets)} loaded")
     click.echo(f"Undo:         words={cfg.undo_words} seconds={cfg.undo_seconds}")
     click.echo(f"Hotkeys:      L+R Shift = pause/resume, double Shift = convert/undo")
+    click.echo(
+        "Layout switch: "
+        + ("lone Shift tap (legacy)" if cfg.shift_tap_switch_layout else "desktop shortcut (Super+Space)")
+    )
 
     asyncio.run(processor.run())
 
@@ -106,6 +111,7 @@ def setup():
                 'manual_only_last_word = false\n'
                 'sound_enabled = true\n'
                 'self_learning = true\n'
+                'shift_tap_switch_layout = false\n'
                 '\n'
                 '[detection]\n'
                 'threshold = 2.5\n'

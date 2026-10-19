@@ -55,7 +55,7 @@ Physical Keyboard(s)
   → KeyProcessor._on_event()
       ├─ L+R Shift held together: _toggle_auto() (pause/resume auto-detect)
       ├─ Double-tap Shift: _do_manual_convert() (sentence convert + undo + learn)
-      ├─ Single Shift: _set_layout() (toggle layout, arms the "don't correct" guard)
+      ├─ Single Shift: legacy gesture, off by default (`shift_tap_switch_layout`); desktop owns Super+Space
       └─ Regular key-down: pass through UInput, then _update_buf()
             ├─ Word separators:
             │   ├─ Snippet check: SnippetStore.expansion() → _expand_snippet()
@@ -89,6 +89,8 @@ Physical Keyboard(s)
 - **Flexible Undo**: Undo by word count or time window, not just single word.
 - **Active-window detection** (`focus.py`): each compositor is queried through its own interface (swaymsg / hyprctl / kdotool / xdotool). GNOME exposes nothing to clients, so per-app exceptions there need the bundled extension in `gnome-extension/`; the same extension also exposes keyboard-layout read/switch (`org.power_switcher.Layout`). Without it exceptions are inert and GNOME layout switching falls back to simulation (unreliable).
 - **Live layout sync**: a manual layout switch (Super+Space) is consumed by the compositor and never reaches the daemon, so the Rust daemon re-reads the *real* layout every 250 ms. On GNOME Wayland, dconf's `input-sources current` is stale and must not be trusted (it caused wrong-layout detection to silently do nothing).
+- **Layout switching is the desktop's job**: `Super+Space` is the only layout hotkey the daemon relies on. The legacy "single Shift tap switches layout" gesture is opt-in (`shift_tap_switch_layout = false` by default) — stray taps while typing must never flip the layout.
+- **Learned words persist**: `LayoutSet::add_learned` / `add_exception` write `words.json` immediately (Python parity), so a word the user un-converts stays protected across daemon restarts.
 - **State file separation**: per-app modes live in `~/.config/power_switcher/exceptions.json`, learned/word exceptions in `words.json`, counters in `stats.json` — they must never share a file.
 - **Detection profiles** are generated from the reference word-frequency lists in `data/frequency/` (see `docs/REVERSE_ENGINEERING.md`).
 
