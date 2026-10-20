@@ -12,8 +12,11 @@ use ps_engine::{Action, Processor, ProcessorConfig, RawEvent, EV_KEY};
 use ps_focus::ActiveWindowProvider;
 
 const KEY_A: u16 = 30;
+const KEY_Z: u16 = 44;
 const KEY_LEFTSHIFT: u16 = 42;
 const KEY_RIGHTSHIFT: u16 = 54;
+const KEY_LEFTCTRL: u16 = 29;
+const KEY_LEFTALT: u16 = 56;
 const KEY_SPACE: u16 = 57;
 const KEY_ESC: u16 = 1;
 const KEY_BACKSPACE: u16 = 14;
@@ -268,7 +271,9 @@ fn double_shift_converts_last_word_back() {
 #[test]
 fn pause_break_converts_last_word_and_is_swallowed() {
     let td = temp_dir();
-    let mut proc = make_processor(&td, default_config());
+    let mut config = default_config();
+    config.hotkey_convert = "pause".to_string();
+    let mut proc = make_processor(&td, config);
     let mut now = 100.0;
 
     // Convert ghbdtn → привет first.
@@ -296,7 +301,7 @@ fn pause_break_converts_last_word_and_is_swallowed() {
 fn pause_passes_through_when_hotkey_is_rebound() {
     let td = temp_dir();
     let mut config = default_config();
-    config.hotkey_convert = "f13".to_string();
+    config.hotkey_convert = "ctrl+alt+z".to_string();
     let mut proc = make_processor(&td, config);
     let now = 100.0;
 
@@ -308,6 +313,75 @@ fn pause_passes_through_when_hotkey_is_rebound() {
             value: 1
         }]
     );
+}
+
+#[test]
+fn ctrl_alt_z_converts_last_word_and_is_swallowed() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config()); // ctrl+alt+z default
+    let mut now = 100.0;
+
+    // Convert ghbdtn → привет first.
+    type_string(&mut proc, "ghbdtn", &mut now);
+    press_space(&mut proc, &mut now);
+    assert_eq!(proc.current_layout(), "ru");
+
+    // Ctrl and Alt presses are echoed, but must not clear the sentence.
+    now += 0.2;
+    let ctrl_press = proc.on_event(RawEvent::key(KEY_LEFTCTRL, 1), now);
+    let alt_press = proc.on_event(RawEvent::key(KEY_LEFTALT, 1), now + 0.01);
+    let mut typed = proc.on_event(RawEvent::key(KEY_Z, 1), now + 0.02);
+    typed.extend(proc.on_event(RawEvent::key(KEY_Z, 0), now + 0.03));
+    let alt_release = proc.on_event(RawEvent::key(KEY_LEFTALT, 0), now + 0.04);
+
+    assert!(ctrl_press
+        .iter()
+        .any(|a| matches!(a, Action::Emit { code, .. } if *code == KEY_LEFTCTRL)));
+    assert!(alt_press
+        .iter()
+        .any(|a| matches!(a, Action::Emit { code, .. } if *code == KEY_LEFTALT)));
+    assert!(
+        !typed
+            .iter()
+            .any(|a| matches!(a, Action::Emit { code, .. } if *code == KEY_Z)),
+        "Ctrl+Alt+Z itself must not be typed: {typed:?}"
+    );
+    // Conversion waits for every modifier to be released, otherwise the
+    // injected types would arrive as Ctrl/Alt shortcuts.
+    assert_eq!(backspace_presses(&typed), 0, "typed={typed:?}");
+    assert_eq!(backspace_presses(&alt_release), 0, "alt={alt_release:?}");
+
+    let actions = proc.on_event(RawEvent::key(KEY_LEFTCTRL, 0), now + 0.05);
+    assert_eq!(backspace_presses(&actions), 7, "actions={actions:?}");
+    assert_eq!(set_layouts(&actions), vec![0]);
+    assert_eq!(proc.stats.manual_conversions(), 1);
+}
+
+#[test]
+fn hotkey_with_extra_modifier_does_not_trigger() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config());
+    let mut now = 100.0;
+
+    type_string(&mut proc, "ghbdtn", &mut now);
+    press_space(&mut proc, &mut now);
+    assert_eq!(proc.current_layout(), "ru");
+
+    // Ctrl+Shift+Alt+Z is not the configured combo: the Z is typed normally.
+    now += 0.2;
+    proc.on_event(RawEvent::key(KEY_LEFTCTRL, 1), now);
+    proc.on_event(RawEvent::key(KEY_LEFTALT, 1), now + 0.01);
+    proc.on_event(RawEvent::key(KEY_LEFTSHIFT, 1), now + 0.02);
+    let actions = proc.on_event(RawEvent::key(KEY_Z, 1), now + 0.03);
+
+    assert_eq!(
+        actions,
+        vec![Action::Emit {
+            code: KEY_Z,
+            value: 1
+        }]
+    );
+    assert_eq!(proc.stats.manual_conversions(), 0);
 }
 
 #[test]

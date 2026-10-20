@@ -368,3 +368,32 @@ bug, documented in the code).
    - Regression test: `ps-gui` now has a GTK test for snippets add+remove
      (fails with "RefCell already mutably borrowed" without the fix).
      Totals: 179 Rust, 138 Python.
+12. Laptop-friendly manual convert + auto-convert diagnostics (2026-10-20).
+   - **Pause/Break is gone from the default**: the user's laptop has no
+     Pause key. `hotkey_convert` now defaults to `ctrl+alt+z`, parsed by the
+     new `ps-engine::hotkey` module (exact modifier set + key). Supported:
+     `ctrl+alt+z` style combos, named keys (`f12`, `insert`, `grave`, …),
+     `pause`/`break`/`pause/break` for full keyboards, and `off`/`none`.
+     An unparsable value logs a warning and disables only the extra hotkey;
+     double-tap Shift always works.
+   - **Modifier presses no longer clear the sentence**: `_update_buf`'s
+     shortcut branch cleared the buffer on Ctrl/Alt presses, so by the time
+     `Z` arrived the last word was gone and the combo converted nothing.
+     Modifier-only keycodes are now exempt; the actual shortcut key still
+     clears it.
+   - **Auto-convert diagnostics**: `find_best_layout` now logs why a word was
+     rejected at DEBUG (`gate: …` with word, layout, target, gain, required)
+     and `maybe_auto` logs paused / front-app / layout-change skips. Run the
+     daemon with `RUST_LOG=ps_engine=debug,ps_core=debug` to see decisions.
+   - **The vocabulary gate was the live failure**: the profiles' 20k words
+     are subtitle frequency lists, so technical terms (`plugin`, `config`,
+     `docker`, `linux`, `клавиатура`, `раскладка`, `настройки`) were never
+     known — typing them in the wrong layout was silently rejected by the
+     "target must be a known word" gate (the debug log showed the user's
+     `здгпшт` / `plugin`). New rule: when *neither* side is known, convert if
+     the n-gram gain clears `threshold + 0.3` and the typed text is not a
+     keyboard run (same-row adjacent-key detection; `fghjkl`, `zxcvbnm`, `vbn`
+     stay blocked). `lrkf` is blocked by the margin; `plugin` (gain 2.91)
+     converts. Python and Rust kept in sync; parity data re-exported unchanged.
+   Tests: 184 Rust (new hotkey parser + Ctrl+Alt+Z replay + extra-modifier
+   passthrough + keyboard-run/technical-term tests), 138 Python, clippy/fmt clean.

@@ -178,10 +178,13 @@ fn cmd_daemon(config_path: &str, no_auto: bool, trace: bool) -> ! {
         "Undo:         words={} seconds={}",
         cfg.undo_words, cfg.undo_seconds
     );
-    let manual_hotkey = cfg.hotkey_convert.to_ascii_lowercase();
-    let manual = match manual_hotkey.as_str() {
-        "pause" | "break" | "pause/break" => format!("double Shift / {}", cfg.hotkey_convert),
-        _ => "double Shift".to_string(),
+    let manual = match ps_engine::hotkey::parse(&cfg.hotkey_convert) {
+        Ok(Some(_)) => format!("double Shift / {}", cfg.hotkey_convert),
+        Ok(None) => "double Shift".to_string(),
+        Err(_) => format!(
+            "double Shift (invalid hotkey_convert {:?} ignored)",
+            cfg.hotkey_convert
+        ),
     };
     println!("Hotkeys:      L+R Shift = pause/resume, manual convert = {manual}");
     println!(

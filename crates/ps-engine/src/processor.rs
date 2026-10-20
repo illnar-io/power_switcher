@@ -12,17 +12,17 @@ use ps_core::key_buffer::{
     KEY_BACKSPACE, KEY_DOWN, KEY_ENTER, KEY_KPENTER, KEY_LEFT, KEY_LEFTALT, KEY_LEFTCTRL,
     KEY_LEFTSHIFT, KEY_RIGHT, KEY_RIGHTSHIFT, KEY_SPACE, KEY_TAB, KEY_UP,
 };
+use ps_core::modifier_state::{ALT_KEYS, CTRL_KEYS, META_KEYS};
 use ps_core::{
     AntiResonanceGuard, ExceptionStore, LayoutSet, ModifierState, ShiftAction, SnippetStore, Stats,
     UndoHistory,
 };
 use ps_focus::ActiveWindowProvider;
 
+use crate::hotkey::{self, Hotkey};
+
 /// `EV_KEY` type code (Linux input-event-codes.h).
 pub const EV_KEY: u16 = 1;
-
-/// Pause/Break (`KEY_PAUSE`) — Caramba's manual-convert hotkey.
-const KEY_PAUSE: u16 = 119;
 
 /// Post-injection blackout: events within this window are dropped
 /// (Python `_injecting_until = time.time() + 0.05`).
@@ -102,9 +102,9 @@ pub struct ProcessorConfig {
     // Layout-switch guards & hotkeys
     pub no_correct_after_switch: f64,
     pub lr_shift_pause: bool,
-    /// Manual-convert hotkey (`"pause"` — Caramba's Pause/Break). Only the
-    /// Pause/Break key is wired in the engine; the string is kept for config
-    /// parity with the Python preset.
+    /// Manual-convert hotkey.  Parsed from `hotkey_convert`:
+    /// `pause`/`break` (Caramba), `ctrl+alt+z` (laptop default), or `off`.
+    /// The built-in double-tap Shift gesture works regardless.
     pub hotkey_convert: String,
     pub manual_only_last_word: bool,
     pub sound_enabled: bool,
@@ -141,7 +141,7 @@ impl Default for ProcessorConfig {
             live_fix_enabled: true,
             no_correct_after_switch: 0.0,
             lr_shift_pause: true,
-            hotkey_convert: "pause".to_string(),
+            hotkey_convert: "ctrl+alt+z".to_string(),
             manual_only_last_word: false,
             sound_enabled: true,
             self_learning: true,
@@ -174,6 +174,13 @@ pub struct Processor {
     injecting: bool,
     queued_events: Vec<RawEvent>,
     injecting_until: f64,
+
+    /// Parsed manual-convert hotkey (`None` = only double-tap Shift).
+    hotkey: Option<Hotkey>,
+    /// A combo hotkey fired on key-down; the actual conversion waits until the
+    /// modifiers are released, otherwise the injected keystrokes would arrive
+    /// as Ctrl/Alt shortcuts.
+    pending_convert: bool,
 
     // Live fix state
     live_fix_last: String,
@@ -218,6 +225,13 @@ impl Processor {
             Some(path) => ExceptionStore::new(path),
             None => ExceptionStore::new(ps_core::app_exceptions::default_exceptions_path()),
         };
+        let hotkey = match hotkey::parse(&config.hotkey_convert) {
+            Ok(hk) => hk,
+            Err(err) => {
+                log::warn!("Ignoring manual-convert hotkey: {err}");
+                None
+            }
+        };
         Self {
             layout: config.current_layout.clone(),
             layout_set,
@@ -234,6 +248,8 @@ impl Processor {
             injecting: false,
             queued_events: Vec::new(),
             injecting_until: 0.0,
+            hotkey,
+            pending_convert: false,
             live_fix_last: String::new(),
             word_edited: false,
             last_real_key_at: 0.0,
@@ -321,19 +337,36 @@ impl Processor {
         let pressed = ev.is_press();
         let repeat = ev.is_repeat();
 
-        // Caramba's Pause/Break hotkey (`hotkey_convert = "pause"`):
-        // convert (or undo) the last word.  Press and release are swallowed —
-        // a Break reaching a terminal would signal the foreground process.
-        if kc == KEY_PAUSE && self.pause_hotkey() {
-            if pressed {
-                self.consumed_release.insert(kc);
-                return self.do_manual_convert(now);
-            }
-            if self.consumed_release.contains(&kc) {
-                if !pressed && !repeat {
-                    self.consumed_release.remove(&kc);
+        // Manual-convert hotkey (Pause/Break, Ctrl+Alt+Z, …): convert (or undo)
+        // the last word.  Press and release are swallowed — a Break reaching a
+        // terminal would signal the foreground process.  With modifiers held
+        // the conversion is deferred until they are released (see
+        // `pending_convert`), otherwise the injected keys would be Ctrl/Alt
+        // shortcuts.
+        if let Some(hk) = self.hotkey {
+            if kc == hk.key {
+                if pressed
+                    && !self.consumed_release.contains(&kc)
+                    && hk.matches(
+                        kc,
+                        self.mods.ctrl,
+                        self.mods.alt,
+                        self.mods.shift,
+                        self.mods.meta,
+                    )
+                {
+                    self.consumed_release.insert(kc);
+                    self.pending_convert = true;
+                    return Vec::new();
                 }
-                return Vec::new();
+                if self.consumed_release.contains(&kc) {
+                    if !pressed && !repeat {
+                        self.consumed_release.remove(&kc);
+                    }
+                    let mut actions = Vec::new();
+                    self.maybe_finish_pending_convert(now, &mut actions);
+                    return actions;
+                }
             }
         }
 
@@ -351,6 +384,9 @@ impl Processor {
                 code: ev.code,
                 value: ev.value,
             }];
+            // Releasing the last modifier of a pending combo hotkey (e.g.
+            // ctrl+shift+z) runs the deferred conversion.
+            self.maybe_finish_pending_convert(now, &mut actions);
 
             if pressed {
                 self.shift_held.insert(kc);
@@ -401,6 +437,16 @@ impl Processor {
             self.pressed.remove(&kc);
         }
 
+        // A different key pressed before the combo's modifiers were released
+        // means the user kept typing — drop the pending conversion.
+        if pressed
+            && !CTRL_KEYS.contains(&kc)
+            && !ALT_KEYS.contains(&kc)
+            && !META_KEYS.contains(&kc)
+        {
+            self.pending_convert = false;
+        }
+
         // Pass through to compositor
         let mut actions = vec![Action::Emit {
             code: ev.code,
@@ -410,7 +456,18 @@ impl Processor {
         if pressed {
             self.update_buf(kc, now, &mut actions);
         }
+        self.maybe_finish_pending_convert(now, &mut actions);
         actions
+    }
+
+    /// Run the deferred combo conversion once every modifier is released.
+    fn maybe_finish_pending_convert(&mut self, now: f64, actions: &mut Vec<Action>) {
+        if self.pending_convert
+            && !(self.mods.ctrl || self.mods.alt || self.mods.shift || self.mods.meta)
+        {
+            self.pending_convert = false;
+            actions.extend(self.do_manual_convert(now));
+        }
     }
 
     fn toggle_auto(&mut self, actions: &mut Vec<Action>) {
@@ -425,18 +482,6 @@ impl Processor {
             },
             actions,
         );
-    }
-
-    /// True when `hotkey_convert` names Pause/Break (Caramba's default).
-    fn pause_hotkey(&self) -> bool {
-        matches!(
-            self.config
-                .hotkey_convert
-                .trim()
-                .to_ascii_lowercase()
-                .as_str(),
-            "pause" | "break" | "pause/break"
-        )
     }
 
     fn sound(&self, name: &'static str, actions: &mut Vec<Action>) {
@@ -534,8 +579,13 @@ impl Processor {
             return;
         }
 
-        // Shortcuts (Ctrl/Alt combos) — clear context
-        if !self.mods.is_plain() {
+        // Shortcuts (Ctrl/Alt combos) — clear context.  Modifier presses alone
+        // must not clear it: the manual-convert combo (e.g. Ctrl+Alt+Z) needs
+        // the last word when the final key arrives, and the actual shortcut
+        // key press clears the buffer a moment later anyway.
+        let is_modifier =
+            CTRL_KEYS.contains(&kc) || ALT_KEYS.contains(&kc) || META_KEYS.contains(&kc);
+        if !self.mods.is_plain() && !is_modifier {
             self.live_fix_last = String::new();
             self.word_edited = false;
             self.buf.clear();
@@ -658,6 +708,10 @@ impl Processor {
         self.refresh_front_app(now);
 
         if self.should_skip_auto() {
+            debug!(
+                "auto-skip {word:?}: paused={} front_app={:?} mode={}",
+                self.auto_paused, self.front_app_class, self.front_app_mode
+            );
             return;
         }
 
@@ -666,6 +720,11 @@ impl Processor {
         if self.config.no_correct_after_switch > 0.0
             && now - self.layout_changed_at < self.config.no_correct_after_switch
         {
+            debug!(
+                "auto-skip {word:?}: layout changed {:.2}s ago (guard {:.2}s)",
+                now - self.layout_changed_at,
+                self.config.no_correct_after_switch
+            );
             return;
         }
 
@@ -943,6 +1002,7 @@ impl Processor {
         };
 
         let converted = self.layout_set.convert(&text, &self.layout, &target);
+        debug!("manual convert {:?} ({} → {})", text, self.layout, target);
         // When only the last word is converted we must retype the whole
         // sentence prefix so the cursor lands in the right place.
         if self.config.manual_only_last_word {

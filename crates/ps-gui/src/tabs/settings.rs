@@ -192,9 +192,10 @@ impl SettingsTab {
         ui::row(&grid, 1, "Convert selection", &hotkey_selection);
         content.append(&grid);
         content.append(&ui::hint(
-            "Caramba defaults: `pause` is Pause/Break (double-tap Shift does the same); \
-             `alt+shift` converts the selection. Converting a selection needs clipboard access \
-             and is not available on Wayland yet.",
+            "Manual convert: `ctrl+alt+z` (default, works on laptops), `pause`/`break` \
+             (Caramba, needs a full keyboard), or `off`. Double-tap Shift always works too. \
+             `alt+shift` converts the selection — that needs clipboard access and is not \
+             available on Wayland yet.",
         ));
         content.append(&ui::hint(
             "Saving rewrites config.toml (comments are not preserved). Restart the daemon from \

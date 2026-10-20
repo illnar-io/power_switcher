@@ -110,13 +110,17 @@ override the data locations.
 | Hotkey | Action |
 |--------|--------|
 | Double-tap Shift | Convert current sentence + switch layout (or undo the last conversion) |
-| Pause/Break | Same manual convert/undo as double-tap Shift (Caramba's default hotkey) |
+| **Ctrl+Alt+Z** | Same manual convert/undo (laptop-friendly default) |
+| Pause/Break | Same manual convert/undo (Caramba's key; opt in with `hotkey_convert = "pause"`) |
 | **Left + Right Shift together** | Pause / resume auto-detection |
 | Single Left/Right Shift | *Legacy, off by default* — switches to layout 1/2 (`shift_tap_switch_layout = true`). Use your desktop's `Super+Space` instead. |
 
-`hotkey_convert` accepts `pause`, `break` or `pause/break`. Converting a
-*selection* (`hotkey_selection = "alt+shift"`, Caramba's default) needs
-clipboard access and is not implemented on Wayland yet.
+`hotkey_convert` accepts a modifier combo (`ctrl+alt+z` — the default),
+`pause`/`break`/`pause/break` (Caramba, needs a full keyboard), or `off`.
+Modifiers: `ctrl`, `alt`, `shift`, `super`; keys: letters, digits, `f1`–`f12`,
+`space`, `enter`, `tab`, `grave`, `insert`, … Double-tap Shift works regardless.
+Converting a *selection* (`hotkey_selection = "alt+shift"`, Caramba's default)
+needs clipboard access and is not implemented on Wayland yet.
 
 ## Configuration
 
@@ -131,7 +135,7 @@ developer_mode   = false           # Disable auto in IDEs/terminals
 arrows_cancel    = true            # Arrow keys clear buffer
 live_fix_enabled = true            # Mid-word eager conversion
 lr_shift_pause   = true            # L+R Shift pauses auto-detection
-hotkey_convert   = "pause"         # Pause/Break: manual convert/undo (Caramba)
+hotkey_convert   = "ctrl+alt+z"    # manual convert/undo ("pause" = Caramba key, "off" = none)
 hotkey_selection = "alt+shift"     # selection convert (reserved; not on Wayland yet)
 manual_only_last_word = false      # Manual convert touches only the last word
 self_learning    = true            # Learn words you un-convert

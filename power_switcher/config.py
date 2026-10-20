@@ -10,9 +10,9 @@ except ModuleNotFoundError:
 
 @dataclass
 class Config:
-    # Caramba Switcher's documented hotkeys: Pause/Break converts (or
-    # undoes) the last word; Alt+Shift converts a selection.
-    hotkey_convert:    str   = "pause"
+    # Manual convert: double-tap Shift always works.  Pause/Break is Caramba's
+    # key; the configurable default is a laptop-friendly combo.
+    hotkey_convert:    str   = "ctrl+alt+z"
     hotkey_selection:  str   = "alt+shift"
     layouts:           list[str] = field(default_factory=lambda: ["en", "ru"])
     default_layout:    str   = "en"

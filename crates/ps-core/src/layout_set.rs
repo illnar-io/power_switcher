@@ -7,10 +7,15 @@
 //! 2. eligibility (length, at least one letter, no ALL-CAPS words);
 //! 3. best gain over the other configured layouts;
 //! 4. punctuated words convert only when the re-mapped form is a real word;
-//! 5. a word that is valid in the current language needs stronger evidence.
+//! 5. a word that is valid in the current language needs stronger evidence;
+//! 6. an unknown target word is accepted only when the typed text is not a
+//!    keyboard run (`fghjkl`, `zxcvbnm`) — this keeps technical terms absent
+//!    from the 20k vocabulary ("plugin", "раскладка") convertible.
 
 use std::error::Error;
 use std::path::Path;
+
+use log::debug;
 
 use crate::layouts::LayoutMaps;
 use crate::ngram::{NGramDetector, Prepared};
@@ -22,6 +27,10 @@ pub const WORD_BONUS: f64 = 2.5;
 pub const WORD_FREQ_ALPHA: f64 = 0.5;
 /// Anchor so the frequency term stays positive (`log(p)` is negative).
 pub const WORD_LOGPROB_FLOOR: f64 = -13.0;
+/// Extra margin when neither the typed word nor the re-mapped form is in the
+/// vocabulary: n-grams alone need slightly stronger evidence (blocks `lrkf`,
+/// keeps `plugin`).
+pub const UNKNOWN_TARGET_MARGIN: f64 = 0.3;
 
 pub const DEFAULT_THRESHOLD: f64 = 2.5;
 pub const DEFAULT_MIN_WORD_LEN: usize = 3;
@@ -169,6 +178,31 @@ impl LayoutSet {
         true
     }
 
+    /// True when consecutive characters sit on adjacent keys of one keyboard
+    /// row (`fghjkl`, `zxcvbnm`, `vbnm`).  Such runs give high n-gram gains but
+    /// are mashing, not words.
+    fn is_keyboard_run(&mut self, word: &str, layout: &str) -> bool {
+        let mut prev: Option<(u8, u8)> = None;
+        let mut pairs = 0usize;
+        let mut adjacent = 0usize;
+        for ch in word.chars() {
+            let Some((kc, _)) = self.maps.char_to_keycode(ch, layout) else {
+                return false;
+            };
+            let Some(pos) = key_position(kc) else {
+                return false;
+            };
+            if let Some(prev) = prev {
+                pairs += 1;
+                if prev.0 == pos.0 && prev.1.abs_diff(pos.1) == 1 {
+                    adjacent += 1;
+                }
+            }
+            prev = Some(pos);
+        }
+        pairs >= 2 && adjacent * 5 >= pairs * 4
+    }
+
     fn word_term_prepared(&self, prepared: &Prepared, lang: &str) -> f64 {
         match self.ngram.word_logprob_prepared(prepared, lang) {
             None => 0.0,
@@ -258,9 +292,11 @@ impl LayoutSet {
         min_word_len: usize,
     ) -> Option<String> {
         if self.is_exception(word) {
+            debug!("gate: {word:?} is a learned word/exception");
             return None;
         }
         if !Self::is_eligible(word, min_word_len) {
+            debug!("gate: {word:?} ineligible (min_word_len={min_word_len})");
             return None;
         }
 
@@ -270,6 +306,8 @@ impl LayoutSet {
             .ngram
             .word_logprob_prepared(&prepared, current_layout)
             .is_some();
+        // Computed up front: `best` later borrows from `self.layouts`.
+        let keyboard_run = py_is_alpha(word) && self.is_keyboard_run(word, current_layout);
 
         let mut best: Option<&str> = None;
         let mut best_gain = 0.0f64;
@@ -298,6 +336,10 @@ impl LayoutSet {
             if self.is_known_word(&best_converted, best) && best_gain >= threshold.max(2.5) {
                 return Some(best.to_string());
             }
+            debug!(
+                "gate: {word:?} has punctuation; {best_converted:?} known={} gain={best_gain:.2}",
+                self.is_known_word(&best_converted, best)
+            );
             return None;
         }
 
@@ -306,20 +348,56 @@ impl LayoutSet {
             let required = (threshold + 1.5).max(3.5);
             let target_known = self.is_known_word(&best_converted, best);
             if !(target_known && best_gain >= required) {
+                debug!(
+                    "gate: {word:?} is a known {current_layout} word; \
+                     {best_converted:?} known_in_{best}={target_known} \
+                     gain={best_gain:.2} required={required:.2}"
+                );
                 return None;
             }
-        } else if best_gain < threshold || !self.is_known_word(&best_converted, best) {
-            // The typed text is not a known word of the current language, so
-            // we only have n-gram plausibility to go on.  Require the re-mapped
-            // form to be an actual word of the target language: without this,
-            // keyboard mashing and vim keys ("hjkl", "lrkf") flip the layout
-            // and produce garbage.  The n-gram bonus for known words means the
-            // threshold still applies on top.
-            return None;
+        } else {
+            let target_known = self.is_known_word(&best_converted, best);
+            if target_known {
+                if best_gain < threshold {
+                    debug!(
+                        "gate: {word:?} unknown in {current_layout}; \
+                         {best_converted:?} known_in_{best} but gain={best_gain:.2} \
+                         threshold={threshold:.2}"
+                    );
+                    return None;
+                }
+            } else if best_gain < threshold + UNKNOWN_TARGET_MARGIN || keyboard_run {
+                // The 20k vocabulary misses technical terms, names and rare
+                // inflections.  With no vocabulary hit on either side, n-gram
+                // evidence decides — but keyboard runs ("fghjkl",
+                // "zxcvbnm", "vbn") produce high n-gram gains for adjacent
+                // keys and must never flip the layout.
+                debug!(
+                    "gate: {word:?} unknown in {current_layout}; \
+                     {best_converted:?} unknown_in_{best} gain={best_gain:.2} \
+                     threshold={threshold:.2} keyboard_run={keyboard_run}"
+                );
+                return None;
+            }
         }
 
         Some(best.to_string())
     }
+}
+
+/// Physical (row, column) of a letter key, for the keyboard-run guard.
+fn key_position(kc: u32) -> Option<(u8, u8)> {
+    const ROWS: [&[u32]; 3] = [
+        &[16, 17, 18, 19, 20, 21, 22, 23, 24, 25], // q w e r t y u i o p
+        &[30, 31, 32, 33, 34, 35, 36, 37, 38],     // a s d f g h j k l
+        &[44, 45, 46, 47, 48, 49, 50],             // z x c v b n m
+    ];
+    for (row, keys) in ROWS.iter().enumerate() {
+        if let Some(col) = keys.iter().position(|&k| k == kc) {
+            return Some((row as u8, col as u8));
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -379,7 +457,9 @@ mod tests {
         // ("hjkl" → "ролд", "lrkf" → "дкла").  The re-mapped form must be a
         // real word of the target language.
         let mut ls = test_set();
-        for word in ["hjkl", "jkl;", "lrkf", "testtest", "dfgh", "wert", "vbn"] {
+        for word in [
+            "hjkl", "jkl;", "lrkf", "testtest", "dfgh", "wert", "vbn", "fghjkl", "zxcvbnm",
+        ] {
             assert_eq!(
                 ls.find_best_layout(word, "en", DEFAULT_THRESHOLD, DEFAULT_MIN_WORD_LEN),
                 None,
@@ -391,6 +471,40 @@ mod tests {
                 ls.find_best_layout(word, "ru", DEFAULT_THRESHOLD, DEFAULT_MIN_WORD_LEN),
                 None,
                 "{word:?} must not convert"
+            );
+        }
+    }
+
+    #[test]
+    fn keyboard_runs_are_detected() {
+        let mut ls = test_set();
+        for word in ["fghjkl", "zxcvbnm", "vbn", "ghjk", "asdfgh"] {
+            assert!(ls.is_keyboard_run(word, "en"), "{word:?}");
+        }
+        for word in ["plugin", "config", "linux", "repo", "tree"] {
+            assert!(!ls.is_keyboard_run(word, "en"), "{word:?}");
+        }
+    }
+
+    #[test]
+    fn technical_terms_missing_from_vocabulary_convert() {
+        // The 20k subtitle vocabulary lacks these words, but n-gram evidence
+        // and the typed text's non-run shape are enough.
+        let mut ls = test_set();
+        for (word, from, to) in [
+            ("plugin", "en", "ru"),
+            ("config", "en", "ru"),
+            ("docker", "en", "ru"),
+            ("клавиатура", "ru", "en"),
+            ("раскладка", "ru", "en"),
+            ("настройки", "ru", "en"),
+        ] {
+            let typed = ls.convert(word, from, to);
+            assert_eq!(
+                ls.find_best_layout(&typed, to, DEFAULT_THRESHOLD, DEFAULT_MIN_WORD_LEN)
+                    .as_deref(),
+                Some(from),
+                "{word:?} typed as {typed:?} must convert back"
             );
         }
     }

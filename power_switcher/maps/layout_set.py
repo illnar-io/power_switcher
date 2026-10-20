@@ -29,6 +29,10 @@ BIGRAMS_FALLBACK: dict[str, dict[str, float]] = {
 _WORD_BONUS = 2.5
 _WORD_FREQ_ALPHA = 0.5
 _WORD_LOGPROB_FLOOR = -13.0
+# Extra margin when neither the typed word nor the re-mapped form is in the
+# vocabulary: n-grams alone need slightly stronger evidence (blocks "lrkf",
+# keeps "plugin").
+UNKNOWN_TARGET_MARGIN = 0.3
 
 
 @dataclass
@@ -188,6 +192,36 @@ class LayoutSet:
             return False
         return True
 
+    def _is_keyboard_run(self, word: str, layout: str) -> bool:
+        """True when consecutive characters sit on adjacent keys of one row.
+
+        Runs like "fghjkl" / "zxcvbnm" / "vbn" give high n-gram gains but are
+        mashing, not words.
+        """
+        rows = (
+            (16, 17, 18, 19, 20, 21, 22, 23, 24, 25),  # q w e r t y u i o p
+            (30, 31, 32, 33, 34, 35, 36, 37, 38),      # a s d f g h j k l
+            (44, 45, 46, 47, 48, 49, 50),              # z x c v b n m
+        )
+        positions = {
+            keycode: (row, col)
+            for row, keys in enumerate(rows)
+            for col, keycode in enumerate(keys)
+        }
+        prev = None
+        pairs = adjacent = 0
+        for ch in word:
+            key = self.char_to_keycode(ch, layout)
+            if key is None or key[0] not in positions:
+                return False
+            pos = positions[key[0]]
+            if prev is not None:
+                pairs += 1
+                if prev[0] == pos[0] and abs(prev[1] - pos[1]) == 1:
+                    adjacent += 1
+            prev = pos
+        return pairs >= 2 and adjacent * 5 >= pairs * 4
+
     def _word_term(self, word: str, lang: str) -> float:
         """Frequency-aware bonus for a whole word that is in the language's
         vocabulary.  Returns 0 for out-of-vocabulary words."""
@@ -268,11 +302,16 @@ class LayoutSet:
             target_known = self.is_known_word(best_converted, best)
             if not (target_known and best_gain >= required):
                 return None
-        elif best_gain < threshold or not self.is_known_word(best_converted, best):
-            # The typed text is not a known word of the current language, so
-            # only n-gram plausibility is left.  Require the re-mapped form to
-            # be an actual word of the target language — otherwise keyboard
-            # mashing and vim keys ("hjkl", "lrkf") flip the layout for nothing.
+        elif self.is_known_word(best_converted, best):
+            if best_gain < threshold:
+                return None
+        elif best_gain < threshold + UNKNOWN_TARGET_MARGIN or self._is_keyboard_run(
+            word, current_layout
+        ):
+            # Neither side is in the 20k vocabulary: technical terms, names and
+            # rare inflections still convert on n-gram evidence, but keyboard
+            # runs ("fghjkl", "zxcvbnm", "vbn") and near-misses ("lrkf") must
+            # not flip the layout.
             return None
 
         logger.debug(

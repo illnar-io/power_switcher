@@ -27,6 +27,7 @@
 //! * Python's audit log went to `~/.cache/power_switcher/audit.log`; here
 //!   audit messages use the `log` crate with an `AUDIT:` prefix.
 
+pub mod hotkey;
 pub mod processor;
 
 pub use processor::{Action, Processor, ProcessorConfig, RawEvent, EV_KEY};

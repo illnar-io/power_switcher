@@ -64,9 +64,10 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            // Caramba Switcher's documented hotkeys: Pause/Break converts
-            // (or undoes) the last word; Alt+Shift converts a selection.
-            hotkey_convert: "pause".to_string(),
+            // Manual convert: double-tap Shift always works.  Pause/Break is
+            // Caramba's key but laptops have no Pause, so the configurable
+            // default is a laptop-friendly combo (Ctrl+Alt+Z).
+            hotkey_convert: "ctrl+alt+z".to_string(),
             hotkey_selection: "alt+shift".to_string(),
             layouts: vec!["en".to_string(), "ru".to_string()],
             default_layout: "en".to_string(),
@@ -412,7 +413,7 @@ mod tests {
         assert_eq!(c.threshold, 2.5);
         assert_eq!(c.no_correct_after_switch, 1.5);
         assert!(c.trigger_punctuation);
-        assert_eq!(c.hotkey_convert, "pause", "Caramba's Pause/Break hotkey");
+        assert_eq!(c.hotkey_convert, "ctrl+alt+z", "laptop-friendly default");
         assert_eq!(
             c.hotkey_selection, "alt+shift",
             "Caramba's selected-text hotkey"
@@ -433,7 +434,7 @@ mod tests {
         )
         .unwrap();
         let c = Config::load(&path).unwrap();
-        assert_eq!(c.hotkey_convert, "pause");
+        assert_eq!(c.hotkey_convert, "ctrl+alt+z");
         assert_eq!(c.hotkey_selection, "alt+shift");
     }
 
@@ -443,11 +444,11 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(
             &path,
-            "[general]\nhotkey_convert = \"f13\"\nhotkey_selection = \"ctrl+shift+z\"\n",
+            "[general]\nhotkey_convert = \"pause\"\nhotkey_selection = \"ctrl+shift+z\"\n",
         )
         .unwrap();
         let c = Config::load(&path).unwrap();
-        assert_eq!(c.hotkey_convert, "f13");
+        assert_eq!(c.hotkey_convert, "pause", "explicit Pause must be kept");
         assert_eq!(c.hotkey_selection, "ctrl+shift+z");
     }
 
