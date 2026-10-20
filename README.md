@@ -34,7 +34,8 @@ Like Punto Switcher / Caramba Switcher / Keyboop, but for Linux Wayland.
 - **Guard after layout switch**: Optionally skip corrections for N seconds after
   the layout changes, so manual switching is not fought by the detector.
 - **Statistics**: Counts conversions, snippet expansions and undos.
-- **Settings GUI**: `python -m power_switcher gui` (tkinter).
+- **Settings GUI**: `ps gui` (GTK4, `ps-gui`) or the legacy
+  `python -m power_switcher gui` (tkinter); both edit the same files.
 
 
 ## Requirements
@@ -61,6 +62,27 @@ python -m power_switcher.detection.build_profiles
 # 4. Run daemon
 python -m power_switcher daemon --verbose
 ```
+
+### Rust daemon and native GUI
+
+The production daemon is the Rust port in `crates/`; the Python tree remains the
+reference implementation and the profile generator.
+
+```bash
+cargo build --release -p ps-daemon -p ps-gui
+
+./target/release/ps setup           # udev rules + default config.toml
+./target/release/ps daemon --verbose
+./target/release/ps gui             # GTK4 settings window (5 tabs)
+```
+
+`ps gui` launches `ps-gui`, a native GTK4 window (Settings, Snippets,
+Applications, Words, Status). It edits `config.toml` and the JSON stores
+directly — same file contract as the CLI — and has no daemon IPC, so settings
+apply after a daemon restart (the Status tab has a restart button).
+
+Requirements for the GUI: GTK 4.10+ development headers (`gtk4-devel` on
+Fedora, `libgtk-4-dev` on Debian/Ubuntu).
 
 ## Hotkeys
 
@@ -262,6 +284,8 @@ power_switcher/
 └── layout/                  # compositor layout backends
 gnome-extension/             # optional GNOME Shell helper for per-app exceptions
 data/frequency/              # reference word-frequency lists (profile source)
+crates/                      # Rust port: ps-core, ps-input, ps-layout, ps-focus,
+                             # ps-engine, ps-daemon (`ps`), ps-gui (GTK4, `ps-gui`)
 docs/REVERSE_ENGINEERING.md  # how the reference apps were analysed
 ```
 

@@ -9,12 +9,12 @@
 //! 4. punctuated words convert only when the re-mapped form is a real word;
 //! 5. a word that is valid in the current language needs stronger evidence.
 
-use std::collections::HashSet;
 use std::error::Error;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::layouts::LayoutMaps;
 use crate::ngram::{NGramDetector, Prepared};
+use crate::word_store::WordStore;
 
 /// Vocabulary bonus applied when a word is in a language's word list.
 pub const WORD_BONUS: f64 = 2.5;
@@ -59,12 +59,8 @@ pub struct LayoutSet {
     pub layouts: Vec<String>,
     ngram: NGramDetector,
     maps: LayoutMaps,
-    /// Words the user taught us never to convert.
-    exceptions: HashSet<String>,
-    /// Words learned automatically when a conversion is undone.
-    learned: HashSet<String>,
-    /// `words.json` backing both sets; `None` → in-memory only.
-    words_path: Option<PathBuf>,
+    /// Manual exceptions + words learned from undo (`words.json`).
+    words: WordStore,
 }
 
 impl LayoutSet {
@@ -103,119 +99,53 @@ impl LayoutSet {
             }
         }
 
-        let mut set = LayoutSet {
+        let set = LayoutSet {
             layouts: layouts.iter().map(|s| s.to_string()).collect(),
             ngram,
             maps,
-            exceptions: HashSet::new(),
-            learned: HashSet::new(),
-            words_path: words_path.map(Path::to_path_buf),
+            words: WordStore::load(words_path),
         };
-        set.load_words(words_path);
         Ok(set)
     }
 
-    /// Load `words.json` (exceptions + learned words).  Missing or corrupt
-    /// files are ignored, matching the Python loader.
+    /// Load `words.json` (exceptions + learned words), replacing the current
+    /// sets.  Missing or corrupt files are ignored, matching the Python loader.
     pub fn load_words(&mut self, path: Option<&Path>) {
-        let Some(path) = path else { return };
-        let Ok(text) = std::fs::read_to_string(path) else {
-            return;
-        };
-        let Ok(data) = serde_json::from_str::<serde_json::Value>(&text) else {
-            return;
-        };
-        if let Some(items) = data.get("exceptions").and_then(|v| v.as_array()) {
-            for it in items {
-                if let Some(w) = it.as_str() {
-                    if w.chars().count() >= 2 {
-                        self.exceptions.insert(w.to_lowercase());
-                    }
-                }
-            }
-        }
-        if let Some(items) = data.get("learned_words").and_then(|v| v.as_array()) {
-            for it in items {
-                if let Some(w) = it.as_str() {
-                    if w.chars().count() >= 2 {
-                        self.learned.insert(w.to_lowercase());
-                    }
-                }
-            }
-        }
+        self.words.set_path(path.map(Path::to_path_buf));
     }
 
     pub fn add_exception(&mut self, word: &str) {
-        if word.chars().count() < 2 {
-            return;
-        }
-        self.exceptions.insert(word.to_lowercase());
-        self.save_words();
+        self.words.add_exception(word);
     }
 
     pub fn add_learned(&mut self, word: &str) {
-        if word.chars().count() < 2 {
-            return;
-        }
-        self.learned.insert(word.to_lowercase());
-        self.save_words();
+        self.words.add_learned(word);
     }
 
     pub fn remove_exception(&mut self, word: &str) -> bool {
-        if self.exceptions.remove(&word.to_lowercase()) {
-            self.save_words();
-            true
-        } else {
-            false
-        }
+        self.words.remove_exception(word)
     }
 
     pub fn remove_learned(&mut self, word: &str) -> bool {
-        if self.learned.remove(&word.to_lowercase()) {
-            self.save_words();
-            true
-        } else {
-            false
-        }
+        self.words.remove_learned(word)
     }
 
     pub fn exceptions(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.exceptions.iter().cloned().collect();
-        v.sort();
-        v
+        self.words.exceptions()
     }
 
     pub fn learned_words(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.learned.iter().cloned().collect();
-        v.sort();
-        v
+        self.words.learned_words()
     }
 
     /// Persist `words.json`, exactly like Python's `LayoutSet._save_state`
     /// (`{"exceptions": [...], "learned_words": [...]}`, sorted, pretty).
-    /// Write failures are logged and ignored — learning must never break typing.
     pub fn save_words(&self) {
-        let Some(path) = &self.words_path else { return };
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let payload = serde_json::json!({
-            "exceptions": self.exceptions(),
-            "learned_words": self.learned_words(),
-        });
-        match serde_json::to_string_pretty(&payload) {
-            Ok(text) => {
-                if let Err(err) = std::fs::write(path, text) {
-                    eprintln!("warning: failed to save {}: {err}", path.display());
-                }
-            }
-            Err(err) => eprintln!("warning: failed to serialise words: {err}"),
-        }
+        self.words.save();
     }
 
     pub fn is_exception(&self, word: &str) -> bool {
-        let w = word.to_lowercase();
-        self.exceptions.contains(&w) || self.learned.contains(&w)
+        self.words.is_exception(word)
     }
 
     pub fn is_known_word(&self, word: &str, lang: &str) -> bool {

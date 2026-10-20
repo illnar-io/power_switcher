@@ -43,8 +43,26 @@ python -m power_switcher words remove 'макбук'
 python -m power_switcher stats show
 python -m power_switcher stats reset
 
-# Settings GUI (tkinter)
+# Settings GUI (tkinter; the GTK4 one is below)
 python -m power_switcher gui
+```
+
+Rust port (`crates/`), the production daemon and the native GUI:
+
+```bash
+# Build everything (ps = daemon, ps-gui = GTK4 settings window)
+cargo build --release -p ps-daemon -p ps-gui
+
+# Run the Rust daemon (grabs the keyboard — use a timeout when testing)
+timeout 30 ./target/release/ps daemon --verbose
+
+# Native settings GUI (5 tabs: Settings, Snippets, Applications, Words, Status)
+./target/release/ps gui          # execs the sibling ps-gui binary
+
+# Rust checks
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all --check
 ```
 
 ## Architecture & Data Flow
@@ -93,6 +111,7 @@ Physical Keyboard(s)
 - **Layout switching is the desktop's job**: `Super+Space` is the only layout hotkey the daemon relies on. The legacy "single Shift tap switches layout" gesture is opt-in (`shift_tap_switch_layout = false` by default) — stray taps while typing must never flip the layout.
 - **Learned words persist**: `LayoutSet::add_learned` / `add_exception` write `words.json` immediately (Python parity), so a word the user un-converts stays protected across daemon restarts.
 - **State file separation**: per-app modes live in `~/.config/power_switcher/exceptions.json`, learned/word exceptions in `words.json`, counters in `stats.json` — they must never share a file.
+- **GUI shares files, not IPC**: `ps-gui` (GTK4, `crates/ps-gui`) reads and writes `config.toml` plus the JSON stores through the same loaders the daemon uses (`Config`, `WordStore`, `SnippetStore`, `ExceptionStore`, `Stats`). It has no daemon socket; changes apply on daemon restart (Status tab has a restart button). GTK must stay out of the daemon binary — `ps gui` execs the sibling `ps-gui`.
 - **Detection profiles** are generated from the reference word-frequency lists in `data/frequency/` (see `docs/REVERSE_ENGINEERING.md`).
 
 ## Code Organization
@@ -125,6 +144,8 @@ power_switcher/
 
 gnome-extension/             # optional GNOME Shell helper for per-app exceptions
 data/frequency/              # reference word-frequency lists (profile source)
+crates/                      # Rust port: ps-core, ps-input, ps-layout, ps-focus,
+                             # ps-engine, ps-daemon (`ps`), ps-gui (GTK4, `ps-gui`)
 docs/REVERSE_ENGINEERING.md  # how the reference apps were analysed
 tests/                       # pytest suite (PYTHONPATH=. pytest)
 ```

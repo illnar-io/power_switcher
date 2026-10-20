@@ -7,6 +7,7 @@ members = [
     "crates/ps-focus",
     "crates/ps-engine",
     "crates/ps-daemon",
+    "crates/ps-gui",
 ]
 
 [workspace.package]

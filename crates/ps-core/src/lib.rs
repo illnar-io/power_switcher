@@ -30,6 +30,7 @@ pub mod snippets;
 pub mod stats;
 pub mod text;
 pub mod undo_history;
+pub mod word_store;
 
 pub use anti_resonance::AntiResonanceGuard;
 pub use app_exceptions::ExceptionStore;
@@ -40,3 +41,4 @@ pub use ngram::NGramDetector;
 pub use snippets::SnippetStore;
 pub use stats::Stats;
 pub use undo_history::{UndoEntry, UndoHistory};
+pub use word_store::WordStore;

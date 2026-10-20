@@ -25,9 +25,9 @@ model format, workspace layout, and "don't convert" regexes).
 | 2. Input core (ps-input, ps-layout, ps-focus, ps-engine) | ✅ done — full KeyProcessor port + 16 event-replay tests |
 | 3. Cutover (ps-daemon) | 🔶 **in progress** — `ps` binary works live on GNOME (see below) |
 | 4. Yofikator/autocorrect/model | ❌ not started |
-| 5. Native GUI | ❌ not started |
+| 5. Native GUI (ps-gui) | ✅ done — GTK4, 5 tabs, `ps gui` |
 
-Test counts: **Rust 161** (`cargo test --workspace`), **Python 138**
+Test counts: **Rust 174** (`cargo test --workspace`), **Python 138**
 (`PYTHONPATH=. python3 -m pytest -q`). Both must stay green; clippy/fmt clean.
 
 ### Phase 3 status (what works today)
@@ -69,7 +69,9 @@ crates/
 ├── ps-input/     # evdev device discovery/filter + UInput VirtualKeyboard
 ├── ps-layout/    # GNOME/KDE/Sway/Hyprland layout backends + detector
 ├── ps-focus/     # Active-window detection (5 strategies, TTL cache)
-└── ps-engine/    # KeyProcessor = PURE ACTION-STREAM STATE MACHINE
+├── ps-engine/    # KeyProcessor = PURE ACTION-STREAM STATE MACHINE
+├── ps-daemon/    # lib (`Config`, `paths`, event loop) + `ps` binary
+└── ps-gui/       # GTK4 settings window (`ps-gui`): 5 tabs, file contract only
 ```
 
 Python source of truth lives in `power_switcher/` (unchanged, still works).
@@ -91,6 +93,9 @@ explicit-clock pattern (`push_at`, `get_class_at`, `record_auto_at`, …).
 ```bash
 cargo test --workspace          # all Rust tests (parity gate included)
 cargo clippy --workspace --all-targets && cargo fmt --all   # must stay clean
+cargo run --release -p ps-daemon -- daemon     # the `ps` binary
+cargo run --release -p ps-gui                  # GTK4 settings window
+./target/release/ps gui                        # same, via the daemon CLI
 PYTHONPATH=. python3 -m pytest -q                           # Python suite
 PYTHONPATH=. python3 tools/export_parity_data.py            # regen golden corpus
 cargo run --release -p ps-core --example bench              # Rust bench
@@ -280,3 +285,34 @@ bug, documented in the code).
      the gate costs 0.02%.
    Tests: `gibberish_is_not_converted` (Rust + Python),
    `test_known_target_still_converts`.
+9. Native GTK4 settings GUI (2026-10-20) — `crates/ps-gui`, phase 5 done.
+   Plain GTK4 0.11 (no libadwaita: the dev package is not installed on the
+   target, only the runtime), one module per tab:
+   - **Settings**: layouts + default layout (validated against the 8 shipped
+     layouts), threshold, min word length, triggers (word + snippet),
+     behaviour toggles (incl. `shift_tap_switch_layout`), undo, hotkeys.
+   - **Snippets**, **Applications** (`off` / `soft` / `default (remove)`),
+     **Words** (learned vs exception), all writing through the shared stores.
+   - **Status**: daemon state (`systemctl --user is-active`, then
+     `pgrep -af "[p]s daemon"` / `"[p]ower_switcher daemon"`), real layout via
+     `g3kb-switch -p`, aligned stats counters, editable file paths, reset with
+     `AlertDialog` confirmation, and a daemon restart button.
+   - **File contract only** (no daemon IPC). `Config::to_toml()` writes the same
+     sections/keys as `gui.py` (floats keep a decimal point so TOML reloads
+     them as floats; custom store paths are preserved). Settings apply on
+     restart; snippet/app/word stores save immediately and are re-read by the
+     daemon on restart.
+   - `words.json` handling moved to `ps-core::WordStore` (load/save/add/remove,
+     legacy list format, sorted lower-case output); `LayoutSet` delegates, so
+     the engine and the GUI cannot drift. `ps-daemon` became lib+bin
+     (`Config`, `paths::{profiles_dir,layouts_json}`); `ps gui` execs the
+     sibling `ps-gui` so GTK never links into the daemon. The systemd unit now
+     runs `ps daemon`.
+   - Verified: 174 Rust tests (4 GUI state tests + config round-trip), clippy
+     `-D warnings`/fmt clean, all five tabs screenshotted. Interactive XTEST
+     clicks do not reach XWayland windows from this shell, so the pages were
+     captured with a temporary initial-page hook (removed afterwards); the GTK
+     smoke run under `GDK_BACKEND=x11` is clean apart from a system Vulkan
+     layer warning (`liblsfg-vk-layer`).
+   - Gotcha: resetting stats while the daemon runs is overwritten by its
+     debounced in-memory save — the confirmation says to restart the daemon.

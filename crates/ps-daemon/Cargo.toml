@@ -9,6 +9,10 @@ license.workspace = true
 name = "ps"
 path = "src/main.rs"
 
+[lib]
+name = "ps_daemon"
+path = "src/lib.rs"
+
 [dependencies]
 ps-core = { path = "../ps-core" }
 ps-input = { path = "../ps-input" }

@@ -318,7 +318,8 @@ failure domain. **Reject.**
 | 1. Engine parity — remainder | **done** | `KeyBuffer`/`SentenceBuffer`, `UndoHistory`, `AntiResonanceGuard`, `SnippetStore`, `ModifierState`, text helpers (`split_last_word`, `changed_char_count`, `check_double_caps`, `is_password`) + `keycode_to_char`/`ambiguous_separator` ported; 72 lib tests (Python suites mirrored, incl. verified quirks like `soft_reset` char-splitting) + 2 parity tests green |
 | 2. Input core | **done** | `ps-input` (device discovery/filter + UInput virtual keyboard, hardware-tested), `ps-layout` (GNOME/KDE/Sway/Hyprland backends + detector, parsers unit-tested; **fixed upstream KDE bug** — Python `\d+` matched `32` inside `uint32`), `ps-focus` (5 strategies + TTL cache), **`ps-engine`: full `KeyProcessor` port as a pure action-stream state machine** (event+timestamp → ordered `Action`s; injection queue + 50 ms cooldown, Caramba gestures, snippets, undo/learning, stats, per-app exceptions) with **16 event-replay tests** (conversion, gestures, undo+learning, snippets, pacing, cooldown). Parity finding: the mid-word eager threshold (15.0) is unreachable for real words — gain max ~11.9 — in Python too. 149 Rust tests, clippy/fmt clean. Remaining for cutover: `ps-daemon` binary (event loop wiring: evdev grab + action executor) |
 | 3. Cutover | **in progress** | `ps-daemon` (`ps` binary) built and **validated live**: startup banner, real-keyboard grab, initial layout sync, SIGTERM shutdown. Config loader (`config.toml`, section-tolerant like Python — fixed a missing-`triggers` regression against the real user config). `--no-auto` applied (Python only echoed it — upstream bug). **Live-test bug fixed:** the GNOME backend trusted dconf `input-sources current`, which is stale on Wayland (reported `ru` while the real layout was `us`), so words were decoded with the wrong layout and never converted. It now reads/switches through `g3kb-switch` (Fedora) or the bundled extension, and the daemon re-syncs the real layout every 250 ms (manual Super+Space is invisible otherwise). Direct-injection loopback test (uinput → /dev/input node, `KEY_FN`). Remaining: config.toml CLI sections for snippets/exceptions/words/stats stay in Python; manual real-typing validation by the user; 1 h soak |
-| 4a–4c / 5 | not started | yofikator, autocorrect, model bundling, native GUI |
+| 4a–4c | not started | yofikator, autocorrect, model bundling |
+| 5. Native GUI | **done** | `crates/ps-gui`: GTK4 0.11, five tabs (Settings, Snippets, Applications, Words, Status), no libadwaita. `Config::to_toml` round-trips the Python key layout; `WordStore` extracted to `ps-core` (shared by engine + GUI); Status shows systemd/pgrep state, `g3kb-switch -p`, stats and a restart button. `ps gui` execs the sibling `ps-gui`; GTK is not linked into the daemon |
 
 Measured on the golden corpus (31 990 cases × 3 rounds, identical inputs,
 release build vs CPython 3.15):
@@ -477,6 +478,14 @@ Wayland-first. We are porting the *engine*, not the reference's UI toolkit.
    GNOME/Wayland, has the best accessibility, and mirrors the current 5-tab
    layout. Choose `eframe`/`egui` instead **only** if a self-contained binary
    with no GTK runtime dependency is a hard requirement.
+5. **Implemented (phase 5): `crates/ps-gui`.** Plain **GTK4** (0.11, no
+   libadwaita — the dev package is not available on the target), five tabs with
+   parity: Settings, Snippets, Applications, Words, Status. `ps-daemon` became a
+   lib+bin so the GUI reuses `Config` and the new `Config::to_toml`
+   (round-trip tested, writes the same sections/keys as the Python writer). The
+   `words.json` logic moved to `ps-core::WordStore`, shared by the engine and the
+   GUI instead of being duplicated. GTK is **not** linked into the daemon:
+   `ps gui` executes the sibling `ps-gui` binary.
 
 ### 12.4 Persistence boundary (protects the GUI/CLI decoupling)
 

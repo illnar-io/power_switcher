@@ -1,0 +1,20 @@
+[package]
+name = "ps-gui"
+description = "PowerSwitcher settings window (GTK4): the `ps-gui` binary"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ps-gui"
+path = "src/main.rs"
+
+[dependencies]
+ps-core = { path = "../ps-core" }
+ps-daemon = { path = "../ps-daemon" }
+# `v4_10` gives us AlertDialog (used for destructive confirmations).
+gtk = { package = "gtk4", version = "0.11", features = ["v4_10"] }
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

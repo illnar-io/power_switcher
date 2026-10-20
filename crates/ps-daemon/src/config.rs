@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub hotkey_convert: String,
     pub hotkey_selection: String,
@@ -286,6 +286,88 @@ impl Config {
             Some(expand_tilde(raw))
         }
     }
+
+    /// Serialise to the same `config.toml` layout the Python GUI writes, so
+    /// either front-end can edit the file without surprising the other.
+    pub fn to_toml(&self) -> String {
+        let layouts = self
+            .layouts
+            .iter()
+            .map(|l| format!("\"{}\"", escape_toml(l)))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let mut lines = vec![
+            "[general]".to_string(),
+            format!("layouts = [{layouts}]"),
+            format!("default_layout = \"{}\"", escape_toml(&self.default_layout)),
+            format!("auto_detect = {}", self.auto_detect),
+            format!("developer_mode = {}", self.developer_mode),
+            format!("arrows_cancel = {}", self.arrows_cancel),
+            format!("live_fix_enabled = {}", self.live_fix_enabled),
+            format!("lr_shift_pause = {}", self.lr_shift_pause),
+            format!("shift_tap_switch_layout = {}", self.shift_tap_switch_layout),
+            format!("manual_only_last_word = {}", self.manual_only_last_word),
+            format!("self_learning = {}", self.self_learning),
+            format!("sound_enabled = {}", self.sound_enabled),
+            format!(
+                "no_correct_after_switch = {}",
+                fmt_float(self.no_correct_after_switch)
+            ),
+            format!("hotkey_convert = \"{}\"", escape_toml(&self.hotkey_convert)),
+            format!(
+                "hotkey_selection = \"{}\"",
+                escape_toml(&self.hotkey_selection)
+            ),
+        ];
+        // Only persist custom store paths; empty means "default location".
+        for (key, value) in [
+            ("snippets_file", &self.snippets_file),
+            ("exceptions_file", &self.exceptions_file),
+            ("words_file", &self.words_file),
+            ("stats_file", &self.stats_file),
+        ] {
+            if !value.is_empty() {
+                lines.push(format!("{key} = \"{}\"", escape_toml(value)));
+            }
+        }
+        lines.extend([
+            String::new(),
+            "[detection]".to_string(),
+            format!("threshold = {}", fmt_float(self.threshold)),
+            format!("min_word_len = {}", self.min_word_len),
+            String::new(),
+            "[triggers]".to_string(),
+            format!("space = {}", self.trigger_space),
+            format!("enter = {}", self.trigger_enter),
+            format!("tab = {}", self.trigger_tab),
+            format!("punctuation = {}", self.trigger_punctuation),
+            format!("snippet_space = {}", self.snippet_expand_space),
+            format!("snippet_enter = {}", self.snippet_expand_enter),
+            format!("snippet_tab = {}", self.snippet_expand_tab),
+            String::new(),
+            "[undo]".to_string(),
+            format!("words = {}", self.undo_words),
+            format!("seconds = {}", fmt_float(self.undo_seconds)),
+        ]);
+        lines.join("\n") + "\n"
+    }
+}
+
+/// TOML basic-string escaping (only the two characters that matter for the
+/// short values we write: layout ids and hotkey names).
+fn escape_toml(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// TOML floats need a decimal point (`3` would deserialise as an integer).
+fn fmt_float(v: f64) -> String {
+    let s = format!("{v}");
+    if s.contains('.') || s.contains('e') || s.contains('E') {
+        s
+    } else {
+        format!("{s}.0")
+    }
 }
 
 /// `~/.config/power_switcher`
@@ -422,5 +504,54 @@ seconds = 5.0
             c.resolve_path("snippets", "snippets.json"),
             Some(PathBuf::from("/tmp/my-snippets.json"))
         );
+    }
+
+    #[test]
+    fn to_toml_round_trips_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let c = Config::default();
+        std::fs::write(&path, c.to_toml()).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded, c, "written config must reload identically");
+    }
+
+    #[test]
+    fn to_toml_round_trips_custom_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let c = Config {
+            layouts: vec!["de".into(), "fr".into(), "ru".into()],
+            default_layout: "de".into(),
+            threshold: 3.0, // would serialise as `3` without the .0 fix
+            min_word_len: 4,
+            undo_seconds: 5.0,
+            no_correct_after_switch: 2.0,
+            developer_mode: true,
+            sound_enabled: false,
+            shift_tap_switch_layout: true,
+            trigger_punctuation: false,
+            snippet_expand_tab: false,
+            words_file: "~/custom-words.json".into(),
+            ..Config::default()
+        };
+        std::fs::write(&path, c.to_toml()).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded, c);
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("threshold = 3.0"));
+    }
+
+    #[test]
+    fn to_toml_preserves_python_key_order_and_sections() {
+        let text = Config::default().to_toml();
+        let general = text.find("[general]").unwrap();
+        let detection = text.find("[detection]").unwrap();
+        let triggers = text.find("[triggers]").unwrap();
+        let undo = text.find("[undo]").unwrap();
+        assert!(general < detection && detection < triggers && triggers < undo);
+        assert!(text.contains("shift_tap_switch_layout = false"));
+        assert!(text.contains("layouts = [\"en\", \"ru\"]"));
     }
 }
