@@ -84,6 +84,27 @@ apply after a daemon restart (the Status tab has a restart button).
 Requirements for the GUI: GTK 4.10+ development headers (`gtk4-devel` on
 Fedora, `libgtk-4-dev` on Debian/Ubuntu).
 
+### Install (user-local systemd service)
+
+```bash
+cargo build --release -p ps-daemon -p ps-gui
+install -Dm755 target/release/ps      ~/.local/bin/ps
+install -Dm755 target/release/ps-gui  ~/.local/bin/ps-gui
+
+# data next to the binary (~/.local/bin/ps → ~/.local/share/power_switcher)
+mkdir -p ~/.local/share/power_switcher/profiles
+cp power_switcher/detection/profiles/*.json.gz ~/.local/share/power_switcher/profiles/
+cp crates/ps-core/data/layouts.json            ~/.local/share/power_switcher/
+
+install -Dm644 systemd/power_switcher.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now power_switcher
+```
+
+The Status tab's **Install service** button does the unit part for you (writing
+`ExecStart` for the `ps` it finds); `PS_PROFILES_DIR` / `PS_LAYOUTS_JSON`
+override the data locations.
+
 ## Hotkeys
 
 | Hotkey | Action |

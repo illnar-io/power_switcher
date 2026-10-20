@@ -163,7 +163,9 @@ impl WordsTab {
             .get(index)
             .map(|(word, _)| word.clone());
         let Some(word) = word else { return };
-        if self.store.borrow_mut().remove(&word) {
+        // Drop the RefMut before `refresh()` borrows the store again.
+        let removed = self.store.borrow_mut().remove(&word);
+        if removed {
             self.message.set_text("");
             self.refresh();
         }

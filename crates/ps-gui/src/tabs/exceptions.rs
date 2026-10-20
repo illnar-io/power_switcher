@@ -158,7 +158,9 @@ impl ExceptionsTab {
             .get(index)
             .map(|(name, _)| name.clone());
         let Some(name) = name else { return };
-        match self.store.borrow_mut().remove(&name) {
+        // Drop the RefMut before `refresh()` borrows the store again.
+        let result = self.store.borrow_mut().remove(&name);
+        match result {
             Ok(_) => {
                 self.message.set_text("");
                 self.refresh();

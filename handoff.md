@@ -343,3 +343,28 @@ bug, documented in the code).
    clippy `-D warnings`/fmt clean. Verified: the GUI shows `pause` /
    `alt+shift` for the existing config and `systemd-analyze --user verify`
    accepts the generated unit.
+11. GUI crash on snippet add + restart diagnostics (2026-10-20).
+   - **Panic fixed**: `SnippetsTab::add` matched on
+     `self.store.borrow_mut().add(...)`; the temporary `RefMut` lives for the
+     whole `match`, and the success arm called `refresh()` → `borrow()` →
+     "RefCell already mutably borrowed" → `panic_cannot_unwind` → abort. The
+     same shape existed in `remove_selected` for snippets and exceptions, and
+     in `words::remove_selected` (`if store.borrow_mut()…`). All now bind the
+     result first so the borrow ends at the statement.
+   - **Restart feedback**: the unit pointed at `~/.local/bin/ps`, which did
+     not exist, so `systemctl --user restart` "succeeded" while the service
+     died with 203/EXEC. Status now reads the unit's ExecStart and refuses
+     with the missing path, and after a restart (or install) polls
+     `is-active` and shows the `Active:`/`Process:` lines instead of claiming
+     success.
+   - **Installed layout**: binaries are now installed user-locally
+     (`~/.local/bin/ps`, `ps-gui`) with profiles + `layouts.json` under
+     `~/.local/share/power_switcher/`. `paths.rs` resolves env override →
+     installed share dir (derived from the exe) → source checkout, so the
+     packaged binary no longer depends on the build tree.
+   - The user's unit (`~/.config/systemd/user/power_switcher.service`,
+     `ExecStart=%h/.local/bin/ps daemon`) is enabled and running; the one
+     snippet is loaded (banner: `Snippets: 1 loaded`).
+   - Regression test: `ps-gui` now has a GTK test for snippets add+remove
+     (fails with "RefCell already mutably borrowed" without the fix).
+     Totals: 179 Rust, 138 Python.

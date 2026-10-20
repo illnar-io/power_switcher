@@ -85,23 +85,35 @@ fn config_home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"))
 }
 
-/// `ps` to put in `ExecStart`: the installed binary, else the one next to
-/// this GUI, else the documented install location.
-fn ps_binary() -> String {
+/// `ps` for `ExecStart`: the unit-usable path plus the file to verify.
+/// Prefers the installed binary, then the one next to this GUI.
+fn ps_binary() -> Option<(String, PathBuf)> {
     if let Some(home) = std::env::var_os("HOME") {
-        if PathBuf::from(home).join(".local/bin/ps").is_file() {
-            return "%h/.local/bin/ps".to_string();
+        let installed = PathBuf::from(home).join(".local/bin/ps");
+        if installed.is_file() {
+            return Some(("%h/.local/bin/ps".to_string(), installed));
         }
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let sibling = dir.join("ps");
             if sibling.is_file() {
-                return sibling.display().to_string();
+                return Some((sibling.display().to_string(), sibling));
             }
         }
     }
-    "%h/.local/bin/ps".to_string()
+    None
+}
+
+/// Binary the installed unit will execute (parsed from `systemctl show`).
+fn unit_exec_binary() -> Option<PathBuf> {
+    let text = output(
+        "systemctl",
+        &["--user", "show", "-p", "ExecStart", "--value", UNIT_NAME],
+    )?;
+    let rest = text.split("path=").nth(1)?;
+    let path = rest.split(';').next()?.trim();
+    (!path.is_empty()).then(|| PathBuf::from(path))
 }
 
 /// Quote a path for systemd's `ExecStart=` when it contains whitespace.
@@ -279,16 +291,27 @@ impl StatusTab {
             ));
             return;
         }
+        if let Some(bin) = unit_exec_binary() {
+            if !bin.is_file() {
+                self.message.set_text(&format!(
+                    "The service points at {}, which does not exist (systemd exits 203/EXEC).\n\
+                     Click “Install service” to rewrite the unit for the binary next to this GUI, \
+                     or install `ps` at that path.",
+                    bin.display()
+                ));
+                return;
+            }
+        }
         match Command::new("systemctl")
             .args(["--user", "restart", UNIT_NAME])
             .output()
         {
             Ok(out) if out.status.success() => {
                 self.message
-                    .set_text("Daemon restart requested — refreshing shortly.");
+                    .set_text("Daemon restart requested — checking whether it stayed up…");
                 let tab = self.clone_refs();
-                gtk::glib::timeout_add_local_once(Duration::from_millis(900), move || {
-                    tab.refresh();
+                gtk::glib::timeout_add_local_once(Duration::from_millis(1200), move || {
+                    tab.verify_started();
                 });
             }
             Ok(out) => {
@@ -302,6 +325,42 @@ impl StatusTab {
                 .message
                 .set_text(&format!("systemctl is unavailable: {err}")),
         }
+    }
+
+    /// After a restart, surface a failed start instead of silently claiming
+    /// success (e.g. 203/EXEC for a missing binary).
+    fn verify_started(&self) {
+        self.refresh();
+        let state = output("systemctl", &["--user", "is-active", UNIT_NAME]).unwrap_or_default();
+        if state == "active" {
+            self.message.set_text("Daemon restarted.");
+            return;
+        }
+        let detail = output(
+            "systemctl",
+            &["--user", "status", "--no-pager", "--lines=0", UNIT_NAME],
+        )
+        .unwrap_or_default();
+        let summary: Vec<&str> = detail
+            .lines()
+            .filter(|line| {
+                line.contains("Active:") || line.contains("Process:") || line.contains("status=203")
+            })
+            .collect();
+        let summary = if summary.is_empty() {
+            detail
+        } else {
+            summary.join("\n")
+        };
+        self.message.set_text(&format!(
+            "The service did not stay running{}:\n{summary}\n\
+             If it exited with 203/EXEC, its ExecStart binary is missing — click “Install service”.",
+            if state.is_empty() {
+                String::new()
+            } else {
+                format!(" ({state})")
+            }
+        ));
     }
 
     fn confirm_install_service(&self) {
@@ -335,11 +394,19 @@ impl StatusTab {
                 .set_text("Cannot locate the config directory (HOME is unset).");
             return;
         };
+        let Some((exec, _)) = ps_binary() else {
+            self.message.set_text(
+                "Cannot find the `ps` binary next to ps-gui or in ~/.local/bin.\n\
+                 Build it with `cargo build --release -p ps-daemon -p ps-gui` (or install `ps` \
+                 into ~/.local/bin) and try again.",
+            );
+            return;
+        };
         let unit_dir = config_home.join("systemd/user");
         let unit_path = unit_dir.join(UNIT_NAME);
         let unit = UNIT_TEMPLATE.replace(
             "ExecStart=%h/.local/bin/ps daemon",
-            &format!("ExecStart={} daemon", systemd_path(&ps_binary())),
+            &format!("ExecStart={} daemon", systemd_path(&exec)),
         );
 
         if let Err(err) = fs::create_dir_all(&unit_dir).and_then(|_| fs::write(&unit_path, unit)) {
@@ -378,12 +445,12 @@ impl StatusTab {
         }
 
         self.message.set_text(&format!(
-            "Service installed at {} and started — refreshing shortly.",
+            "Service installed at {} — checking whether the daemon started…",
             unit_path.display()
         ));
         let tab = self.clone_refs();
-        gtk::glib::timeout_add_local_once(Duration::from_millis(900), move || {
-            tab.refresh();
+        gtk::glib::timeout_add_local_once(Duration::from_millis(1200), move || {
+            tab.verify_started();
         });
     }
 

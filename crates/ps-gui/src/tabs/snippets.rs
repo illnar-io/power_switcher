@@ -140,7 +140,12 @@ impl SnippetsTab {
                 .set_text("Both an abbreviation and an expansion are required.");
             return;
         }
-        match self.store.borrow_mut().add(&trigger, &expansion) {
+        // The RefMut from `borrow_mut()` must be dropped before `refresh()`
+        // re-borrows the store — keeping the call in the `match` scrutinee
+        // made the borrow live across the whole match body (panic: already
+        // mutably borrowed).
+        let result = self.store.borrow_mut().add(&trigger, &expansion);
+        match result {
             Ok(()) => {
                 self.message.set_text("");
                 self.trigger.set_text("");
@@ -165,7 +170,8 @@ impl SnippetsTab {
             .get(index as usize)
             .map(|(trigger, _)| trigger.clone());
         let Some(trigger) = trigger else { return };
-        match self.store.borrow_mut().remove(&trigger) {
+        let result = self.store.borrow_mut().remove(&trigger);
+        match result {
             Ok(_) => {
                 self.message.set_text("");
                 self.refresh();
@@ -193,5 +199,43 @@ impl SnippetsTab {
                 ui::esc(expansion)
             )));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ps_daemon::config::Config;
+
+    /// Regression test for the add/remove panic: the store borrow must be
+    /// released before `refresh()` re-borrows it.
+    #[test]
+    fn add_and_remove_do_not_reenter_the_store_borrow() {
+        if gtk::init().is_err() {
+            eprintln!("skipping GTK test: no display");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let state = GuiState {
+            config_path: dir.path().join("config.toml"),
+            config: Config::default(),
+            snippets_path: dir.path().join("snippets.json"),
+            exceptions_path: dir.path().join("exceptions.json"),
+            words_path: dir.path().join("words.json"),
+            stats_path: dir.path().join("stats.json"),
+        };
+        let tab = SnippetsTab::new(&state);
+
+        tab.trigger.set_text("!tt");
+        tab.expansion.set_text("user@example.com");
+        tab.add();
+        assert_eq!(tab.store.borrow().len(), 1);
+        assert!(tab.list.row_at_index(0).is_some());
+
+        tab.list.select_row(tab.list.row_at_index(0).as_ref());
+        tab.remove_selected();
+        assert!(tab.store.borrow().is_empty());
+        // refresh() leaves the "no snippets yet" placeholder row.
+        assert!(tab.list.row_at_index(0).is_some());
     }
 }
