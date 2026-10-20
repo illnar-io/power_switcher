@@ -10,8 +10,10 @@ except ModuleNotFoundError:
 
 @dataclass
 class Config:
-    hotkey_convert:    str   = "alt+pause"
-    hotkey_selection:  str   = "ctrl+alt+z"
+    # Caramba Switcher's documented hotkeys: Pause/Break converts (or
+    # undoes) the last word; Alt+Shift converts a selection.
+    hotkey_convert:    str   = "pause"
+    hotkey_selection:  str   = "alt+shift"
     layouts:           list[str] = field(default_factory=lambda: ["en", "ru"])
     default_layout:    str   = "en"
     auto_detect:       bool  = True
@@ -66,6 +68,11 @@ class Config:
         g = d.get("general", {})
         c.hotkey_convert   = g.get("hotkey_convert",   c.hotkey_convert)
         c.hotkey_selection = g.get("hotkey_selection", c.hotkey_selection)
+        # Old reserved placeholders (never wired to a key) → Caramba defaults.
+        if c.hotkey_convert == "alt+pause":
+            c.hotkey_convert = cls.hotkey_convert
+        if c.hotkey_selection == "ctrl+alt+z":
+            c.hotkey_selection = cls.hotkey_selection
 
         # Support both 'layouts' and legacy 'layout_pair'
         c.layouts = g.get("layouts", g.get("layout_pair", c.layouts))

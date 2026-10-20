@@ -89,8 +89,13 @@ Fedora, `libgtk-4-dev` on Debian/Ubuntu).
 | Hotkey | Action |
 |--------|--------|
 | Double-tap Shift | Convert current sentence + switch layout (or undo the last conversion) |
+| Pause/Break | Same manual convert/undo as double-tap Shift (Caramba's default hotkey) |
 | **Left + Right Shift together** | Pause / resume auto-detection |
 | Single Left/Right Shift | *Legacy, off by default* — switches to layout 1/2 (`shift_tap_switch_layout = true`). Use your desktop's `Super+Space` instead. |
+
+`hotkey_convert` accepts `pause`, `break` or `pause/break`. Converting a
+*selection* (`hotkey_selection = "alt+shift"`, Caramba's default) needs
+clipboard access and is not implemented on Wayland yet.
 
 ## Configuration
 
@@ -105,6 +110,8 @@ developer_mode   = false           # Disable auto in IDEs/terminals
 arrows_cancel    = true            # Arrow keys clear buffer
 live_fix_enabled = true            # Mid-word eager conversion
 lr_shift_pause   = true            # L+R Shift pauses auto-detection
+hotkey_convert   = "pause"         # Pause/Break: manual convert/undo (Caramba)
+hotkey_selection = "alt+shift"     # selection convert (reserved; not on Wayland yet)
 manual_only_last_word = false      # Manual convert touches only the last word
 self_learning    = true            # Learn words you un-convert
 sound_enabled    = true            # Play a sound on conversion

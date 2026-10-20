@@ -1,5 +1,6 @@
 //! Status tab — daemon state, current layout, counters and paths.
 
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -10,6 +11,10 @@ use ps_core::Stats;
 
 use crate::state::GuiState;
 use crate::ui;
+
+/// The service unit shipped with the source tree.
+const UNIT_TEMPLATE: &str = include_str!("../../../../systemd/power_switcher.service");
+const UNIT_NAME: &str = "power_switcher.service";
 
 pub struct StatusTab {
     pub root: gtk::ScrolledWindow,
@@ -46,7 +51,7 @@ fn output(cmd: &str, args: &[&str]) -> Option<String> {
 /// systemd unit first, then a process scan (the daemon is often started from
 /// a terminal during development).
 fn daemon_state() -> String {
-    if let Some(state) = output("systemctl", &["user", "is-active", "power_switcher"]) {
+    if let Some(state) = output("systemctl", &["--user", "is-active", UNIT_NAME]) {
         if state == "active" {
             return "running (systemd unit power_switcher.service)".to_string();
         }
@@ -59,6 +64,53 @@ fn daemon_state() -> String {
         }
     }
     "not running".to_string()
+}
+
+/// Is the user unit installed (`systemctl --user cat` succeeds)?
+fn unit_installed() -> bool {
+    Command::new("systemctl")
+        .args(["--user", "cat", UNIT_NAME])
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false)
+}
+
+fn config_home() -> Option<PathBuf> {
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        let path = PathBuf::from(xdg);
+        if path.is_absolute() {
+            return Some(path);
+        }
+    }
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"))
+}
+
+/// `ps` to put in `ExecStart`: the installed binary, else the one next to
+/// this GUI, else the documented install location.
+fn ps_binary() -> String {
+    if let Some(home) = std::env::var_os("HOME") {
+        if PathBuf::from(home).join(".local/bin/ps").is_file() {
+            return "%h/.local/bin/ps".to_string();
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let sibling = dir.join("ps");
+            if sibling.is_file() {
+                return sibling.display().to_string();
+            }
+        }
+    }
+    "%h/.local/bin/ps".to_string()
+}
+
+/// Quote a path for systemd's `ExecStart=` when it contains whitespace.
+fn systemd_path(path: &str) -> String {
+    if path.contains(char::is_whitespace) {
+        format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        path.to_string()
+    }
 }
 
 fn current_layout() -> String {
@@ -96,12 +148,19 @@ impl StatusTab {
         let refresh = gtk::Button::with_label("Refresh");
         let restart = gtk::Button::with_label("Restart daemon");
         restart.add_css_class("suggested-action");
+        let install = gtk::Button::with_label("Install service");
         let reset = gtk::Button::with_label("Reset statistics");
         reset.add_css_class("destructive-action");
         buttons.append(&refresh);
         buttons.append(&restart);
+        buttons.append(&install);
         buttons.append(&reset);
         content.append(&buttons);
+        content.append(&ui::hint(
+            "Restart uses the systemd user unit power_switcher.service. If it is not installed \
+             yet, “Install service” writes ~/.config/systemd/user/power_switcher.service, enables \
+             it at login and starts it (stop a manually started daemon first).",
+        ));
 
         content.append(&ui::section("Statistics"));
         let counters_grid = ui::form();
@@ -143,6 +202,10 @@ impl StatusTab {
         {
             let tab = tab.clone_refs();
             restart.connect_clicked(move |_| tab.restart_daemon());
+        }
+        {
+            let tab = tab.clone_refs();
+            install.connect_clicked(move |_| tab.confirm_install_service());
         }
         {
             let tab = tab.clone_refs();
@@ -209,8 +272,15 @@ impl StatusTab {
     }
 
     fn restart_daemon(&self) {
+        if !unit_installed() {
+            self.message.set_text(&format!(
+                "{UNIT_NAME} is not installed yet — click “Install service” first, or run:\n\
+                 cp systemd/{UNIT_NAME} ~/.config/systemd/user/ && systemctl --user enable --now {UNIT_NAME}"
+            ));
+            return;
+        }
         match Command::new("systemctl")
-            .args(["user", "restart", "power_switcher"])
+            .args(["--user", "restart", UNIT_NAME])
             .output()
         {
             Ok(out) if out.status.success() => {
@@ -224,14 +294,97 @@ impl StatusTab {
             Ok(out) => {
                 let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
                 self.message.set_text(&format!(
-                    "Could not restart power_switcher.service: {stderr}\n\
-                     Start the daemon manually with `ps daemon` or install the systemd user unit."
+                    "Could not restart {UNIT_NAME}: {stderr}\n\
+                     Start the daemon manually with `ps daemon` to see its output."
                 ));
             }
             Err(err) => self
                 .message
                 .set_text(&format!("systemctl is unavailable: {err}")),
         }
+    }
+
+    fn confirm_install_service(&self) {
+        let dialog = gtk::AlertDialog::builder()
+            .modal(true)
+            .message("Install the systemd user service?")
+            .detail(
+                "This writes ~/.config/systemd/user/power_switcher.service, enables it at login \
+                 and starts the daemon now. Stop any daemon started manually first — two \
+                 instances cannot grab the same keyboard.",
+            )
+            .buttons(["Cancel", "Install and start"])
+            .cancel_button(0)
+            .default_button(0)
+            .build();
+        let tab = self.clone_refs();
+        dialog.choose(
+            Some(&self.window),
+            gtk::gio::Cancellable::NONE,
+            move |result| {
+                if result == Ok(1) {
+                    tab.install_service();
+                }
+            },
+        );
+    }
+
+    fn install_service(&self) {
+        let Some(config_home) = config_home() else {
+            self.message
+                .set_text("Cannot locate the config directory (HOME is unset).");
+            return;
+        };
+        let unit_dir = config_home.join("systemd/user");
+        let unit_path = unit_dir.join(UNIT_NAME);
+        let unit = UNIT_TEMPLATE.replace(
+            "ExecStart=%h/.local/bin/ps daemon",
+            &format!("ExecStart={} daemon", systemd_path(&ps_binary())),
+        );
+
+        if let Err(err) = fs::create_dir_all(&unit_dir).and_then(|_| fs::write(&unit_path, unit)) {
+            self.message
+                .set_text(&format!("Could not write {}: {err}", unit_path.display()));
+            return;
+        }
+
+        let steps: [(&[&str], &str); 2] = [
+            (
+                &["--user", "daemon-reload"],
+                "systemctl --user daemon-reload",
+            ),
+            (
+                &["--user", "enable", "--now", UNIT_NAME],
+                "systemctl --user enable --now",
+            ),
+        ];
+        for (args, what) in steps {
+            match Command::new("systemctl").args(args).output() {
+                Ok(out) if out.status.success() => {}
+                Ok(out) => {
+                    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                    self.message.set_text(&format!(
+                        "Installed {} but `{what}` failed: {stderr}",
+                        unit_path.display()
+                    ));
+                    return;
+                }
+                Err(err) => {
+                    self.message
+                        .set_text(&format!("systemctl is unavailable: {err}"));
+                    return;
+                }
+            }
+        }
+
+        self.message.set_text(&format!(
+            "Service installed at {} and started — refreshing shortly.",
+            unit_path.display()
+        ));
+        let tab = self.clone_refs();
+        gtk::glib::timeout_add_local_once(Duration::from_millis(900), move || {
+            tab.refresh();
+        });
     }
 
     fn confirm_reset(&self) {

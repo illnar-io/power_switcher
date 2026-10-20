@@ -14,7 +14,7 @@ A Python daemon that:
 2. **Passes all keystrokes through** a virtual `UInput` keyboard to the compositor as-is (transparent by default)
 3. **Tracks a rolling word buffer** of characters the user is typing
 4. **On word boundary** (Space / Enter / Tab / punctuation): runs an n-gram language detector on the buffered word; if the word scores higher when converted to the other layout → auto-converts it
-5. **On hotkey press** (e.g. `Alt+Pause`): takes the current word buffer, converts it to the other layout, injects `Backspace × N` + converted text via UInput/ydotool, switches layout via DE D-Bus
+5. **On hotkey press** (e.g. `Pause/Break`): takes the current word buffer, converts it to the other layout, injects `Backspace × N` + converted text via UInput/ydotool, switches layout via DE D-Bus
 6. Works on **KDE, GNOME, COSMIC, any Wayland compositor** — no extensions required for core functionality
 
 **This is like PuntoSwitcher / CarambaSwitcher but for Linux Wayland.**
@@ -966,8 +966,8 @@ from pathlib import Path
 
 @dataclass
 class Config:
-    hotkey_convert:   str   = "alt+pause"
-    hotkey_selection: str   = "ctrl+alt+z"
+    hotkey_convert:   str   = "pause"
+    hotkey_selection: str   = "alt+shift"
     default_layout:   str   = "en"
     other_layout:     str   = "ru"
     auto_detect:      bool  = True
@@ -1165,8 +1165,8 @@ journalctl --user -u power_switcher -f
 
 ```toml
 [general]
-hotkey_convert   = "alt+pause"    # convert last word + switch layout
-hotkey_selection = "ctrl+alt+z"   # convert selected text + switch layout
+hotkey_convert   = "pause"        # Pause/Break: convert last word + switch layout
+hotkey_selection = "alt+shift"    # convert selected text + switch layout
 default_layout   = "en"
 auto_detect      = true           # set false to disable auto-mode
 

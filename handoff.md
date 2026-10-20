@@ -316,3 +316,30 @@ bug, documented in the code).
      layer warning (`liblsfg-vk-layer`).
    - Gotcha: resetting stats while the daemon runs is overwritten by its
      debounced in-memory save — the confirmation says to restart the daemon.
+10. Caramba hotkeys + a working service install (2026-10-20).
+   - **Defaults now match Caramba Switcher**: `hotkey_convert = "pause"`
+     (Pause/Break) and `hotkey_selection = "alt+shift"`. Both loaders
+     (Rust `Config::load`, Python `Config.load`) upgrade the old placeholder
+     values (`alt+pause` / `ctrl+alt+z`, which never triggered a key), so
+     existing `config.toml` files pick up the new defaults without editing.
+   - **Pause/Break is wired in the engine**: a press calls the same
+     `do_manual_convert` as double-tap Shift (convert, or undo when the
+     buffer is empty); press *and* release are swallowed so a Break never
+     reaches a terminal. `ProcessorConfig::hotkey_convert` accepts
+     `pause` / `break` / `pause/break`; other values pass Pause through.
+     Selection conversion (`alt+shift`) needs clipboard access and is still
+     not implemented on Wayland — the GUI says so.
+   - **Status tab restart bug fixed**: the code called
+     `systemctl user restart …` (invalid); it now uses `systemctl --user`.
+   - **New "Install service" button**: writes
+     `~/.config/systemd/user/power_switcher.service` (unit embedded in the
+     binary, `ExecStart` resolved from `~/.local/bin/ps`, the sibling `ps`,
+     or `%h/.local/bin/ps`), runs `daemon-reload` + `enable --now`, with a
+     confirmation warning that a manually started daemon must be stopped
+     first. "Restart daemon" now explains that the unit must be installed
+     instead of failing with a systemctl error.
+   Tests: 178 Rust (4 new: pause converts + is swallowed, pause passthrough
+   when rebound, hotkey migration, explicit hotkeys preserved), 138 Python,
+   clippy `-D warnings`/fmt clean. Verified: the GUI shows `pause` /
+   `alt+shift` for the existing config and `systemd-analyze --user verify`
+   accepts the generated unit.

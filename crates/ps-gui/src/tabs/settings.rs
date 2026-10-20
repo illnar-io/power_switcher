@@ -192,6 +192,11 @@ impl SettingsTab {
         ui::row(&grid, 1, "Convert selection", &hotkey_selection);
         content.append(&grid);
         content.append(&ui::hint(
+            "Caramba defaults: `pause` is Pause/Break (double-tap Shift does the same); \
+             `alt+shift` converts the selection. Converting a selection needs clipboard access \
+             and is not available on Wayland yet.",
+        ));
+        content.append(&ui::hint(
             "Saving rewrites config.toml (comments are not preserved). Restart the daemon from \
              the Status tab to apply changes; changing the layout list rebuilds the detector on \
              restart.",

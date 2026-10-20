@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+/// Hotkey values written by older versions; `Config::load` upgrades them.
+const LEGACY_HOTKEY_CONVERT: &str = "alt+pause";
+const LEGACY_HOTKEY_SELECTION: &str = "ctrl+alt+z";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub hotkey_convert: String,
@@ -60,8 +64,10 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            hotkey_convert: "alt+pause".to_string(),
-            hotkey_selection: "ctrl+alt+z".to_string(),
+            // Caramba Switcher's documented hotkeys: Pause/Break converts
+            // (or undoes) the last word; Alt+Shift converts a selection.
+            hotkey_convert: "pause".to_string(),
+            hotkey_selection: "alt+shift".to_string(),
             layouts: vec!["en".to_string(), "ru".to_string()],
             default_layout: "en".to_string(),
             auto_detect: true,
@@ -173,6 +179,15 @@ impl Config {
         }
         if let Some(v) = g.hotkey_selection {
             c.hotkey_selection = v;
+        }
+        // Migrate configs written before the Caramba defaults were adopted:
+        // the old values were reserved placeholders that never triggered a
+        // key, so nobody could have relied on them.
+        if c.hotkey_convert == LEGACY_HOTKEY_CONVERT {
+            c.hotkey_convert = Self::default().hotkey_convert;
+        }
+        if c.hotkey_selection == LEGACY_HOTKEY_SELECTION {
+            c.hotkey_selection = Self::default().hotkey_selection;
         }
         // Support both 'layouts' and legacy 'layout_pair'.
         if let Some(v) = g.layouts.or(g.layout_pair) {
@@ -397,10 +412,43 @@ mod tests {
         assert_eq!(c.threshold, 2.5);
         assert_eq!(c.no_correct_after_switch, 1.5);
         assert!(c.trigger_punctuation);
+        assert_eq!(c.hotkey_convert, "pause", "Caramba's Pause/Break hotkey");
+        assert_eq!(
+            c.hotkey_selection, "alt+shift",
+            "Caramba's selected-text hotkey"
+        );
         assert!(
             !c.shift_tap_switch_layout,
             "lone Shift tap must not switch layouts by default"
         );
+    }
+
+    #[test]
+    fn migrates_legacy_hotkey_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[general]\nhotkey_convert = \"alt+pause\"\nhotkey_selection = \"ctrl+alt+z\"\n",
+        )
+        .unwrap();
+        let c = Config::load(&path).unwrap();
+        assert_eq!(c.hotkey_convert, "pause");
+        assert_eq!(c.hotkey_selection, "alt+shift");
+    }
+
+    #[test]
+    fn keeps_explicit_hotkeys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[general]\nhotkey_convert = \"f13\"\nhotkey_selection = \"ctrl+shift+z\"\n",
+        )
+        .unwrap();
+        let c = Config::load(&path).unwrap();
+        assert_eq!(c.hotkey_convert, "f13");
+        assert_eq!(c.hotkey_selection, "ctrl+shift+z");
     }
 
     #[test]

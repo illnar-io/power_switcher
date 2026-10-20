@@ -144,6 +144,7 @@ fn cmd_daemon(config_path: &str, no_auto: bool, trace: bool) -> ! {
         live_fix_enabled: cfg.live_fix_enabled,
         no_correct_after_switch: cfg.no_correct_after_switch,
         lr_shift_pause: cfg.lr_shift_pause,
+        hotkey_convert: cfg.hotkey_convert.clone(),
         manual_only_last_word: cfg.manual_only_last_word,
         sound_enabled: cfg.sound_enabled,
         self_learning: cfg.self_learning,
@@ -177,7 +178,12 @@ fn cmd_daemon(config_path: &str, no_auto: bool, trace: bool) -> ! {
         "Undo:         words={} seconds={}",
         cfg.undo_words, cfg.undo_seconds
     );
-    println!("Hotkeys:      L+R Shift = pause/resume, double Shift = convert/undo");
+    let manual_hotkey = cfg.hotkey_convert.to_ascii_lowercase();
+    let manual = match manual_hotkey.as_str() {
+        "pause" | "break" | "pause/break" => format!("double Shift / {}", cfg.hotkey_convert),
+        _ => "double Shift".to_string(),
+    };
+    println!("Hotkeys:      L+R Shift = pause/resume, manual convert = {manual}");
     println!(
         "Layout switch: {}",
         if cfg.shift_tap_switch_layout {

@@ -17,6 +17,7 @@ const KEY_RIGHTSHIFT: u16 = 54;
 const KEY_SPACE: u16 = 57;
 const KEY_ESC: u16 = 1;
 const KEY_BACKSPACE: u16 = 14;
+const KEY_PAUSE: u16 = 119;
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -262,6 +263,51 @@ fn double_shift_converts_last_word_back() {
     // Back to EN.
     assert_eq!(set_layouts(&actions), vec![0]);
     assert_eq!(proc.stats.manual_conversions(), 1);
+}
+
+#[test]
+fn pause_break_converts_last_word_and_is_swallowed() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config());
+    let mut now = 100.0;
+
+    // Convert ghbdtn → привет first.
+    type_string(&mut proc, "ghbdtn", &mut now);
+    press_space(&mut proc, &mut now);
+    assert_eq!(proc.current_layout(), "ru");
+
+    // Pause/Break (Caramba's hotkey) converts the sentence back.
+    now += 0.2;
+    let mut actions = proc.on_event(RawEvent::key(KEY_PAUSE, 1), now);
+    actions.extend(proc.on_event(RawEvent::key(KEY_PAUSE, 0), now + 0.05));
+
+    assert_eq!(backspace_presses(&actions), 7, "actions={actions:?}");
+    assert_eq!(set_layouts(&actions), vec![0]);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Emit { code, .. } if *code == KEY_PAUSE)),
+        "Pause/Break must not reach the compositor: {actions:?}"
+    );
+    assert_eq!(proc.stats.manual_conversions(), 1);
+}
+
+#[test]
+fn pause_passes_through_when_hotkey_is_rebound() {
+    let td = temp_dir();
+    let mut config = default_config();
+    config.hotkey_convert = "f13".to_string();
+    let mut proc = make_processor(&td, config);
+    let now = 100.0;
+
+    let actions = proc.on_event(RawEvent::key(KEY_PAUSE, 1), now);
+    assert_eq!(
+        actions,
+        vec![Action::Emit {
+            code: KEY_PAUSE,
+            value: 1
+        }]
+    );
 }
 
 #[test]

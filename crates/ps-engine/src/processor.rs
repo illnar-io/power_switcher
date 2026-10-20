@@ -21,6 +21,9 @@ use ps_focus::ActiveWindowProvider;
 /// `EV_KEY` type code (Linux input-event-codes.h).
 pub const EV_KEY: u16 = 1;
 
+/// Pause/Break (`KEY_PAUSE`) — Caramba's manual-convert hotkey.
+const KEY_PAUSE: u16 = 119;
+
 /// Post-injection blackout: events within this window are dropped
 /// (Python `_injecting_until = time.time() + 0.05`).
 const INJECTION_COOLDOWN: f64 = 0.05;
@@ -99,6 +102,10 @@ pub struct ProcessorConfig {
     // Layout-switch guards & hotkeys
     pub no_correct_after_switch: f64,
     pub lr_shift_pause: bool,
+    /// Manual-convert hotkey (`"pause"` — Caramba's Pause/Break). Only the
+    /// Pause/Break key is wired in the engine; the string is kept for config
+    /// parity with the Python preset.
+    pub hotkey_convert: String,
     pub manual_only_last_word: bool,
     pub sound_enabled: bool,
     pub self_learning: bool,
@@ -134,6 +141,7 @@ impl Default for ProcessorConfig {
             live_fix_enabled: true,
             no_correct_after_switch: 0.0,
             lr_shift_pause: true,
+            hotkey_convert: "pause".to_string(),
             manual_only_last_word: false,
             sound_enabled: true,
             self_learning: true,
@@ -182,6 +190,8 @@ pub struct Processor {
     lr_shift_consumed: bool,
     shift_held: HashSet<u16>,
     layout_changed_at: f64,
+    /// Pause/Break presses we swallowed (the release must be swallowed too).
+    consumed_release: HashSet<u16>,
 }
 
 impl Processor {
@@ -233,6 +243,7 @@ impl Processor {
             lr_shift_consumed: false,
             shift_held: HashSet::new(),
             layout_changed_at: 0.0,
+            consumed_release: HashSet::new(),
             config,
         }
     }
@@ -309,6 +320,22 @@ impl Processor {
         let kc = ev.code;
         let pressed = ev.is_press();
         let repeat = ev.is_repeat();
+
+        // Caramba's Pause/Break hotkey (`hotkey_convert = "pause"`):
+        // convert (or undo) the last word.  Press and release are swallowed —
+        // a Break reaching a terminal would signal the foreground process.
+        if kc == KEY_PAUSE && self.pause_hotkey() {
+            if pressed {
+                self.consumed_release.insert(kc);
+                return self.do_manual_convert(now);
+            }
+            if self.consumed_release.contains(&kc) {
+                if !pressed && !repeat {
+                    self.consumed_release.remove(&kc);
+                }
+                return Vec::new();
+            }
+        }
 
         if repeat {
             return vec![Action::Emit {
@@ -398,6 +425,18 @@ impl Processor {
             },
             actions,
         );
+    }
+
+    /// True when `hotkey_convert` names Pause/Break (Caramba's default).
+    fn pause_hotkey(&self) -> bool {
+        matches!(
+            self.config
+                .hotkey_convert
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "pause" | "break" | "pause/break"
+        )
     }
 
     fn sound(&self, name: &'static str, actions: &mut Vec<Action>) {
