@@ -1,16 +1,56 @@
+# Python caches and local environments
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
 *.egg-info/
 .venv/
+venv/
 .crush/
+
 # Rust build artefacts
 /target/
+**/*.rs.bk
+
+# Generated knowledge graph (rebuild locally with `graphify update .`)
+graphify-out/
+
 # Generated/derived scratch data, except the reference word-frequency lists
 # that build_profiles.py needs to regenerate the n-gram profiles.
 data/*
 !data/frequency/
-caramba-switcher-analysis.md
-AGENT_INSTRUCTIONS.md
+
+# Local logs, environment, and editor/OS junk
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Package/build outputs (release artifacts are published, not committed)
+/dist/
+/build/
+*.AppImage
+*.deb
+*.rpm
+*.pkg.tar.*
+*.tar.gz
+*.tar.xz
+*.zip
+
 # Proprietary reference apps used for reverse engineering (not redistributable).
 ref/
+caramba-switcher-analysis.md
