@@ -77,7 +77,10 @@ impl VirtualKeyboard {
 /// True when uinput is usable in this environment (device node + write access).
 /// Used by tests to skip hardware-dependent cases gracefully.
 pub fn uinput_available() -> bool {
-    std::fs::metadata("/dev/uinput").is_ok()
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/uinput")
+        .is_ok()
 }
 
 #[cfg(test)]
