@@ -1033,7 +1033,7 @@ impl Processor {
     /// key releases, which left keys stuck down (and kept GNOME's
     /// "disable touchpad while typing" active).
     fn end_injection(&mut self, now: f64, actions: &mut Vec<Action>) {
-        let to_replay: Vec<RawEvent> = self.queued_events.drain(..).collect();
+        let to_replay = std::mem::take(&mut self.queued_events);
         self.injecting = false;
         for ev in to_replay {
             if ev.type_ == EV_KEY {
