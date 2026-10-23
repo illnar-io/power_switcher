@@ -29,7 +29,7 @@ esac
 STAGE=$OUT/stage/power-switcher-$VERSION-$ARCH
 mkdir -p "$OUT" "$STAGE"
 
-cargo build --release -p ps-daemon -p ps-gui
+cargo build --release --locked -p ps-daemon -p ps-gui
 
 install -d "$STAGE/bin" "$STAGE/share/power_switcher/profiles" \
     "$STAGE/share/applications" "$STAGE/share/icons/hicolor/scalable/apps" \
