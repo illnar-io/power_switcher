@@ -66,7 +66,9 @@ pub fn find_keyboards() -> Vec<Device> {
         }
     }
     if result.is_empty() {
-        warn!("no physical keyboards found (insufficient permissions? try the `input` group)");
+        warn!(
+            "no physical keyboards found (check udev uaccess permissions; run `power-switcher setup`)"
+        );
     }
     result
 }

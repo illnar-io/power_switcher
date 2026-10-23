@@ -12,8 +12,8 @@
 //! * every branch of `_on_event` / `_update_buf` / `_maybe_auto` /
 //!   `_replace_text` / `_expand_snippet` / `_do_manual_convert`;
 //! * the injection queue: physical events arriving mid-injection are held and
-//!   replayed afterwards, and everything within 50 ms after injection is
-//!   dropped (Python `_injecting_until`);
+//!   replayed afterwards (the Python 50 ms post-injection blackout was dropped:
+//!   it also discarded key releases, sticking keys down);
 //! * injection pacing (the 5/8/10 ms inter-event delays) as
 //!   [`Action::Inject::delay_ms`];
 //! * Caramba gestures: double-tap Shift converts, single Shift toggles,

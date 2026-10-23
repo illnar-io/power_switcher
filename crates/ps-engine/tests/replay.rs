@@ -60,17 +60,17 @@ fn default_config() -> ProcessorConfig {
     ProcessorConfig::default()
 }
 
-/// Type every character of `s` (in the EN layout), returning all actions.
+/// Type every character of `s` in `layout`, returning all actions.
 /// `now` is advanced by 20 ms per keystroke press.
-fn type_string(proc: &mut Processor, s: &str, now: &mut f64) -> Vec<Action> {
+fn type_string_in(proc: &mut Processor, s: &str, layout: &str, now: &mut f64) -> Vec<Action> {
     let mut all = Vec::new();
     for ch in s.chars() {
         let (kc, shifted) = if ch == ' ' {
             (KEY_SPACE, false)
         } else {
             proc.layout_set
-                .char_to_keycode(ch, "en")
-                .unwrap_or_else(|| panic!("no keycode for {ch:?} in en"))
+                .char_to_keycode(ch, layout)
+                .unwrap_or_else(|| panic!("no keycode for {ch:?} in {layout}"))
         };
         *now += 0.02;
         if shifted {
@@ -84,6 +84,11 @@ fn type_string(proc: &mut Processor, s: &str, now: &mut f64) -> Vec<Action> {
         }
     }
     all
+}
+
+/// Type every character of `s` in the EN layout.
+fn type_string(proc: &mut Processor, s: &str, now: &mut f64) -> Vec<Action> {
+    type_string_in(proc, s, "en", now)
 }
 
 /// Press and release space (the word boundary).
@@ -169,6 +174,152 @@ fn wrong_layout_word_converts_on_space() {
     assert_eq!(proc.stats.auto_conversions(), 1);
     // Processor now believes the layout is RU.
     assert_eq!(proc.current_layout(), "ru");
+}
+
+#[test]
+fn repeated_unknown_word_is_learned_and_protected() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config());
+    let mut now = 100.0;
+
+    for i in 0..3 {
+        type_string(&mut proc, "blorpt", &mut now);
+        let actions = press_space(&mut proc, &mut now);
+        eprintln!(
+            "hit {i}: backspaces={} actions={:?}",
+            backspace_presses(&actions),
+            actions
+        );
+        assert!(set_layouts(&actions).is_empty());
+    }
+    eprintln!("learned={:?}", proc.layout_set.learned_words());
+
+    assert!(
+        proc.layout_set
+            .learned_words()
+            .contains(&"blorpt".to_string()),
+        "word used three times must be learned: {:?}",
+        proc.layout_set.learned_words()
+    );
+    assert_eq!(proc.layout_set.correct_spelling("blorpt", "en", true), None);
+}
+
+#[test]
+fn known_and_wrong_layout_words_are_not_auto_learned() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config());
+    let mut now = 100.0;
+
+    for _ in 0..3 {
+        type_string(&mut proc, "hello", &mut now);
+        press_space(&mut proc, &mut now);
+        type_string(&mut proc, "ghbdtn", &mut now);
+        press_space(&mut proc, &mut now);
+    }
+
+    assert!(proc.layout_set.learned_words().is_empty());
+}
+
+#[test]
+fn russian_typo_is_autocorrected_on_space() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config());
+    let mut now = 100.0;
+    proc.set_layout_state("ru");
+
+    type_string_in(&mut proc, "превет", "ru", &mut now);
+    let actions = press_space(&mut proc, &mut now);
+    assert_eq!(backspace_presses(&actions), 7, "actions={actions:?}");
+    assert!(set_layouts(&actions).is_empty(), "same layout, no switch");
+    assert_eq!(proc.current_layout(), "ru");
+    assert_eq!(proc.stats.auto_conversions(), 1);
+}
+
+#[test]
+fn russian_layout_english_word_converts_on_space() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config());
+    let mut now = 100.0;
+    proc.set_layout_state("ru");
+
+    // Physical keys for "hello" under a Russian layout produce "руддщ".
+    let actions = type_string(&mut proc, "hello", &mut now);
+    assert!(injects(&actions).is_empty(), "typing alone must not inject");
+    let actions = press_space(&mut proc, &mut now);
+
+    assert_eq!(backspace_presses(&actions), 6, "actions={actions:?}");
+    assert_eq!(set_layouts(&actions), vec![0]);
+    assert_eq!(proc.current_layout(), "en");
+    assert_eq!(proc.stats.auto_conversions(), 1);
+}
+
+#[test]
+fn typo_is_autocorrected_on_space() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config());
+    let mut now = 100.0;
+
+    // Unknown in EN, one edit from "world", no layout conversion.
+    type_string(&mut proc, "wprld", &mut now);
+    let actions = press_space(&mut proc, &mut now);
+    assert_eq!(backspace_presses(&actions), 6, "actions={actions:?}");
+    assert!(set_layouts(&actions).is_empty(), "same layout, no switch");
+    assert_eq!(proc.stats.auto_conversions(), 1);
+    assert_eq!(proc.current_layout(), "en");
+}
+
+#[test]
+fn transposition_is_autocorrected() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config());
+    let mut now = 100.0;
+
+    // `recieve` is one transposition from `receive`; frequency alone left it
+    // ambiguous with `relieve`, the edit prior resolves it.
+    type_string(&mut proc, "recieve", &mut now);
+    let actions = press_space(&mut proc, &mut now);
+    assert_eq!(backspace_presses(&actions), 8, "actions={actions:?}");
+    assert_eq!(proc.stats.auto_conversions(), 1);
+}
+
+#[test]
+fn far_consonant_edit_is_not_autocorrected() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config());
+    let mut now = 100.0;
+
+    // `coding` is a real technical word the 20k vocabulary lacks.  `coming`
+    // is a far consonant substitution (d → m), not a plausible key slip.
+    type_string(&mut proc, "coding", &mut now);
+    let actions = press_space(&mut proc, &mut now);
+    assert!(injects(&actions).is_empty(), "actions={actions:?}");
+    assert_eq!(proc.stats.auto_conversions(), 0);
+}
+
+#[test]
+fn mid_sentence_capital_is_not_autocorrected() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config());
+    let mut now = 100.0;
+
+    type_string(&mut proc, "hello", &mut now);
+    press_space(&mut proc, &mut now);
+    type_string(&mut proc, "Groq", &mut now);
+    let actions = press_space(&mut proc, &mut now);
+    assert!(injects(&actions).is_empty(), "actions={actions:?}");
+    assert_eq!(proc.stats.auto_conversions(), 0);
+}
+
+#[test]
+fn sentence_start_capital_typo_is_corrected() {
+    let td = temp_dir();
+    let mut proc = make_processor(&td, default_config());
+    let mut now = 100.0;
+
+    type_string(&mut proc, "Thsi", &mut now);
+    let actions = press_space(&mut proc, &mut now);
+    assert_eq!(backspace_presses(&actions), 5, "actions={actions:?}");
+    assert_eq!(proc.stats.auto_conversions(), 1);
 }
 
 #[test]
@@ -698,27 +849,32 @@ fn non_key_events_pass_through_with_their_type() {
 }
 
 #[test]
-fn post_injection_cooldown_drops_events() {
+fn events_right_after_injection_are_not_dropped() {
     let td = temp_dir();
     let mut proc = make_processor(&td, default_config());
     let mut now = 100.0;
 
     type_string(&mut proc, "ghbdtn", &mut now);
     press_space(&mut proc, &mut now); // injection happens at `now`
-                                      // An event within 50 ms of the injection start is dropped.
-    let actions = proc.on_event(RawEvent::key(KEY_A, 1), now + 0.03);
-    assert!(actions.is_empty(), "cooldown must drop events");
-    // After the cooldown, events are processed again.
-    let actions = proc.on_event(RawEvent::key(KEY_A, 1), now + 0.10);
+
+    // Events right after the injection must still be emitted.  Dropping them
+    // left key releases lost, so the key stayed stuck down (and GNOME kept
+    // "disable touchpad while typing" active).
+    let mut actions = proc.on_event(RawEvent::key(KEY_A, 1), now + 0.01);
+    actions.extend(proc.on_event(RawEvent::key(KEY_A, 0), now + 0.03));
     assert!(
-        actions.iter().any(|a| matches!(
-            a,
-            Action::Emit {
-                code: KEY_A,
-                value: 1
-            }
-        )),
-        "after cooldown events pass through"
+        actions.contains(&Action::Emit {
+            code: KEY_A,
+            value: 1
+        }),
+        "press must pass: {actions:?}"
+    );
+    assert!(
+        actions.contains(&Action::Emit {
+            code: KEY_A,
+            value: 0
+        }),
+        "release must pass: {actions:?}"
     );
 }
 

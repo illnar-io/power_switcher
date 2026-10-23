@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 
 use log::warn;
 
+use crate::fsutil::{read_private, write_private};
+
 /// Persisted set of words that must never be auto-converted.
 #[derive(Debug, Default, Clone)]
 pub struct WordStore {
@@ -58,7 +60,7 @@ impl WordStore {
         self.exceptions.clear();
         self.learned.clear();
         let Some(path) = &self.path else { return };
-        let Ok(text) = std::fs::read_to_string(path) else {
+        let Ok(text) = read_private(path) else {
             return;
         };
         let data: serde_json::Value = match serde_json::from_str(&text) {
@@ -116,18 +118,13 @@ impl WordStore {
     /// Persist `words.json` (sorted, pretty, UTF-8 preserved).
     pub fn save(&self) {
         let Some(path) = &self.path else { return };
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-        }
         let payload = serde_json::json!({
             "exceptions": self.exceptions(),
             "learned_words": self.learned_words(),
         });
         match serde_json::to_string_pretty(&payload) {
             Ok(text) => {
-                if let Err(err) = std::fs::write(path, text) {
+                if let Err(err) = write_private(path, text.as_bytes()) {
                     warn!("failed to save {}: {err}", path.display());
                 }
             }

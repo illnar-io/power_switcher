@@ -56,6 +56,23 @@ impl LayoutMaps {
         self.tables.keys().map(|s| s.as_str()).collect()
     }
 
+    /// Lower-cased unshifted letters available in a layout, used as the
+    /// alphabet for spelling-correction candidates.
+    pub fn alphabet(&self, layout: &str) -> Vec<char> {
+        let Some(table) = self.tables.get(layout) else {
+            return Vec::new();
+        };
+        let mut chars: Vec<char> = table
+            .iter()
+            .filter_map(|(_, lo, _)| first_char(lo))
+            .filter(|c| c.is_alphabetic())
+            .filter_map(|c| c.to_lowercase().next())
+            .collect();
+        chars.sort_unstable();
+        chars.dedup();
+        chars
+    }
+
     /// Precompute the conversion map for a layout pair (idempotent).
     pub fn ensure_char_map(&mut self, from: &str, to: &str) {
         let key = (from.to_string(), to.to_string());

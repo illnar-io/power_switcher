@@ -20,13 +20,33 @@ from ..layout.backends import GNOMESwitchBackend
 
 logger = logging.getLogger(__name__)
 
-audit_path = Path("~/.cache/power_switcher/audit.log").expanduser()
-audit_path.parent.mkdir(parents=True, exist_ok=True)
 audit_log = logging.getLogger("audit")
 audit_log.setLevel(logging.DEBUG)
-handler = logging.FileHandler(audit_path, mode="w")
-handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-audit_log.addHandler(handler)
+
+
+def configure_audit_log(path: Path | None = None) -> None:
+    """Attach the private audit file only when the Python daemon starts.
+
+    Importing this module (tests, tools) must not create files in the user's
+    cache.  The path is configurable for tests and alternate configs.
+    """
+    target = Path(path).expanduser() if path else Path("~/.cache/power_switcher/audit.log").expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.parent.chmod(0o700)
+    except OSError:
+        pass
+    try:
+        target.touch(mode=0o600, exist_ok=True)
+        target.chmod(0o600)
+    except OSError:
+        pass
+    for existing in audit_log.handlers:
+        if isinstance(existing, logging.FileHandler) and Path(existing.baseFilename) == target:
+            return
+    handler = logging.FileHandler(target, mode="w")
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    audit_log.addHandler(handler)
 
 
 class KeyProcessor:
@@ -116,7 +136,6 @@ class KeyProcessor:
         self._sentence = SentenceBuffer()
         self._mods = ModifierState()
         self._pressed: set[int] = set()
-        self._injecting_until = 0.0
         self._ui: UInput | None = None
         self._keyboards: list[InputDevice] = []
         self._running = True
@@ -204,7 +223,7 @@ class KeyProcessor:
     def _refresh_front_app(self):
         cls = get_active_window_class()
         if cls != self._front_app_class:
-            logger.debug("Focus changed: %r", cls)
+            logger.debug("Focus changed")
         self._front_app_class = cls
         self._front_app_mode = self._exceptions.get_mode(cls)
 
@@ -278,9 +297,6 @@ class KeyProcessor:
 
         if self._is_injecting:
             self._queued_events.append(ev)
-            return
-
-        if time.time() < self._injecting_until:
             return
 
         kc = ev.code
@@ -501,7 +517,8 @@ class KeyProcessor:
                     converted = self.layout_set.convert(word, self._layout, target)
                     if self._anti_resonance.allow(word, converted):
                         audit_log.info(
-                            f"AUDIT: Mid-word converting '{word}' ({self._layout}) -> {target}"
+                            "AUDIT: Mid-word conversion (%s) -> %s (%d chars)",
+                            self._layout, target, len(word),
                         )
                         asyncio.create_task(
                             self._replace_text(word, converted, target, separator_kc=None)
@@ -559,19 +576,24 @@ class KeyProcessor:
             converted = self.layout_set.convert(word, self._layout, target)
             if not self._anti_resonance.allow(word, converted):
                 return
-            audit_log.info(f"AUDIT: Converting '{word}' ({self._layout}) -> {target}")
+            audit_log.info(
+                "AUDIT: Conversion (%s) -> %s (%d chars)",
+                self._layout, target, len(word),
+            )
             await self._replace_text(
                 word, converted, target,
                 separator_kc=separator_kc, separator_shift=separator_shift,
             )
             self.stats.record_auto(self._changed_char_count(word, converted))
-            logger.debug("auto-detected %r → %r", word, converted)
+            logger.debug("auto-detected (%d -> %d chars)", len(word), len(converted))
 
     # ── snippet expansion ────────────────────────────────────────────────
 
     async def _expand_snippet(self, trigger: str, expansion: str, separator_kc: int):
         """Replace trigger word with snippet expansion."""
-        audit_log.info(f"AUDIT: Snippet '{trigger}' -> '{expansion}'")
+        audit_log.info(
+            "AUDIT: Snippet expansion (%d -> %d chars)", len(trigger), len(expansion)
+        )
 
         # Erase trigger + the separator key that was already sent
         erase_count = len(trigger) + 1  # +1 for the separator
@@ -621,11 +643,9 @@ class KeyProcessor:
             self._is_injecting = False
             events_to_replay = list(self._queued_events)
             self._queued_events.clear()
-            self._injecting_until = 0
             for q_ev in events_to_replay:
                 if q_ev.type == e.EV_KEY:
                     await self._on_event(q_ev)
-            self._injecting_until = time.time() + 0.05
 
     # ── text replacement ─────────────────────────────────────────────────
 
@@ -732,11 +752,9 @@ class KeyProcessor:
             self._is_injecting = False
             events_to_replay = list(self._queued_events)
             self._queued_events.clear()
-            self._injecting_until = 0
             for q_ev in events_to_replay:
                 if q_ev.type == e.EV_KEY:
                     await self._on_event(q_ev)
-            self._injecting_until = time.time() + 0.05
 
     # ── manual convert (double-shift) ────────────────────────────────────
 
@@ -815,8 +833,9 @@ class KeyProcessor:
         # Only learn plain alphabetic words (never URLs, code, etc.).
         if original.isalpha() and len(original) >= 2:
             self.layout_set.add_learned(original)
-            audit_log.info(f"AUDIT: learned word '{original}' (user reverted)")
-            logger.info("Learned word: %r", original)
+            audit_log.info(
+                "AUDIT: learned word (%d chars, user reverted)", len(original)
+            )
 
     async def _undo_entries(self, entries: list):
         """Undo multiple entries (flexible undo by word count)."""

@@ -20,8 +20,9 @@ pub const DEFAULT_TTL: f64 = 1.0;
 /// Subprocess timeout for every strategy call (Python `_run(timeout=1.0)`).
 const RUN_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// Poll interval while waiting for a strategy subprocess.
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// Poll interval while waiting for a strategy subprocess.  A 4 ms `gdbus` call
+/// must not become a 10 ms stall on the word-boundary decision path.
+const POLL_INTERVAL: Duration = Duration::from_millis(1);
 
 /// D-Bus coordinates of the companion GNOME Shell extension
 /// (`gnome-extension/`).
@@ -152,7 +153,11 @@ impl ActiveWindowProvider {
         for &strategy in &strategies {
             let raw = self.run_strategy(strategy);
             let value = parse::clean(&raw);
-            debug!("focus strategy {} -> {:?}", strategy.name(), value);
+            debug!(
+                "focus strategy {} succeeded={}",
+                strategy.name(),
+                !value.is_empty()
+            );
             if !value.is_empty() {
                 self.cached = value;
                 self.cached_at = now;

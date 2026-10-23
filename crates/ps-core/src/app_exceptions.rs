@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 use log::{info, warn};
 
+use crate::fsutil::{read_private, write_private};
+
 /// Known developer/IDE apps (disable auto-detect in these).
 pub const DEV_APP_PATTERNS: &[&str] = &[
     "jetbrains",
@@ -54,7 +56,7 @@ impl ExceptionStore {
     }
 
     fn load(&mut self) {
-        let Ok(text) = std::fs::read_to_string(&self.path) else {
+        let Ok(text) = read_private(&self.path) else {
             return;
         };
         let data: serde_json::Value = match serde_json::from_str(&text) {
@@ -87,14 +89,9 @@ impl ExceptionStore {
     }
 
     fn persist(&self) -> io::Result<()> {
-        if let Some(parent) = self.path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
-        }
         let map: std::collections::BTreeMap<&String, &String> =
             self.exceptions.iter().map(|(k, v)| (k, v)).collect();
-        std::fs::write(&self.path, serde_json::to_string_pretty(&map)?)
+        write_private(&self.path, serde_json::to_string_pretty(&map)?.as_bytes())
     }
 
     /// Return 'off', 'soft', or 'default' for an app (substring match,

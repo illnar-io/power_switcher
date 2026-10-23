@@ -75,6 +75,9 @@ pub struct NGramDetector {
     log_unknown: f64,
     grams: HashMap<String, HashMap<String, f64>>,
     logwords: HashMap<String, HashMap<String, f64>>,
+    /// Median word probability per language; candidates below it are not
+    /// common enough to autocorrect towards.
+    word_cutoff: HashMap<String, f64>,
 }
 
 impl NGramDetector {
@@ -85,6 +88,7 @@ impl NGramDetector {
             log_unknown: unknown_prob.ln(),
             grams: HashMap::new(),
             logwords: HashMap::new(),
+            word_cutoff: HashMap::new(),
         }
     }
 
@@ -106,6 +110,13 @@ impl NGramDetector {
             plain
         };
         let data: ProfileFile = serde_json::from_slice(&bytes)?;
+
+        // Median word probability: the correction candidate must be at least
+        // this common, which keeps technical terms out of the autocorrect path.
+        let mut probs: Vec<f64> = data.words.values().copied().filter(|p| *p > 0.0).collect();
+        probs.sort_by(f64::total_cmp);
+        let cutoff = probs.get(probs.len() / 2).copied().unwrap_or(1.0);
+        self.word_cutoff.insert(lang.to_string(), cutoff);
 
         let mut logwords = HashMap::with_capacity(data.words.len());
         for (w, p) in data.words {
@@ -194,6 +205,12 @@ impl NGramDetector {
 
     pub fn is_known_word(&self, word: &str, lang: &str) -> bool {
         self.word_logprob(word, lang).is_some()
+    }
+
+    /// Median word probability of a language's vocabulary (the minimum for an
+    /// autocorrect candidate).  `None` when the profile is not loaded.
+    pub fn word_cutoff(&self, lang: &str) -> Option<f64> {
+        self.word_cutoff.get(lang).copied()
     }
 
     /// Highest-scoring language for `word` among `languages`.

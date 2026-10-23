@@ -64,9 +64,12 @@ impl AntiResonanceGuard {
             // A → B and later B → A: the conversion is being undone by itself.
             if prev_produced == word && now - prev_time < self.freeze_seconds {
                 warn!(
-                    "Anti-resonance: conversion oscillation detected ({} → {} → {}), \
+                    "Anti-resonance: conversion oscillation detected ({} -> {} -> {} chars), \
                      freezing auto-conversion for {}s",
-                    prev_word, prev_produced, word, self.freeze_seconds
+                    prev_word.chars().count(),
+                    prev_produced.chars().count(),
+                    word.chars().count(),
+                    self.freeze_seconds
                 );
                 self.frozen_until = now + self.freeze_seconds;
                 self.history.clear();
@@ -78,9 +81,11 @@ impl AntiResonanceGuard {
                 && now - prev_time < self.freeze_seconds
             {
                 warn!(
-                    "Anti-resonance: conversion loop detected ({} → {}), \
+                    "Anti-resonance: conversion loop detected ({} -> {} chars), \
                      freezing auto-conversion for {}s",
-                    word, produced, self.freeze_seconds
+                    word.chars().count(),
+                    produced.chars().count(),
+                    self.freeze_seconds
                 );
                 self.frozen_until = now + self.freeze_seconds;
                 self.history.clear();

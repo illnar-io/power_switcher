@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=PowerSwitcher
+GenericName=Keyboard Layout Switcher
+Comment=Fix text typed in the wrong keyboard layout
+Exec=power-switcher-gui
+Icon=power-switcher
+Terminal=false
+Categories=Utility;
+Keywords=keyboard;layout;switcher;typing;раскладка;клавиатура;
+StartupNotify=true

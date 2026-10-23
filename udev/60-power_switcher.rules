@@ -1,0 +1,9 @@
+# PowerSwitcher: grant the active seat user (uaccess) access to keyboards and
+# /dev/uinput.  This rule must load before systemd's 73-seat-late.rules, which
+# applies the ACL.  Internal keyboards often have no ID_SEAT, so pin them to
+# the primary seat; USB keyboards keep the seat udev already assigned.  The
+# input group is a legacy fallback for systems without logind; use
+# `install.sh --add-group` only if uaccess is unavailable.
+KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", TAG+="uaccess", OPTIONS+="static_node=uinput"
+KERNEL=="event*", SUBSYSTEM=="input", ENV{ID_INPUT_KEYBOARD}=="1", GROUP="input", MODE="0660", TAG+="uaccess"
+KERNEL=="event*", SUBSYSTEM=="input", ENV{ID_INPUT_KEYBOARD}=="1", ENV{ID_SEAT}=="", ENV{ID_SEAT}="seat0"

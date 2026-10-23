@@ -2,7 +2,7 @@
 //!
 //! See the crate docs for the action-stream design.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use log::{debug, info};
@@ -24,9 +24,11 @@ use crate::hotkey::{self, Hotkey};
 /// `EV_KEY` type code (Linux input-event-codes.h).
 pub const EV_KEY: u16 = 1;
 
-/// Post-injection blackout: events within this window are dropped
-/// (Python `_injecting_until = time.time() + 0.05`).
-const INJECTION_COOLDOWN: f64 = 0.05;
+/// Unknown words seen this many times without being corrected are added to the
+/// user dictionary.  Counts are per daemon run; the learned word itself persists.
+const AUTO_LEARN_HITS: u8 = 3;
+/// Bound on the in-memory observation table (one-off words are dropped).
+const AUTO_LEARN_TRACKED_MAX: usize = 4096;
 
 /// One raw input event (the fields of `evdev.InputEvent` the daemon reads).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,6 +101,7 @@ pub struct ProcessorConfig {
     pub developer_mode: bool,
     pub arrows_cancel: bool,
     pub live_fix_enabled: bool,
+    pub spell_check: bool,
     // Layout-switch guards & hotkeys
     pub no_correct_after_switch: f64,
     pub lr_shift_pause: bool,
@@ -139,6 +142,7 @@ impl Default for ProcessorConfig {
             developer_mode: false,
             arrows_cancel: true,
             live_fix_enabled: true,
+            spell_check: true,
             no_correct_after_switch: 0.0,
             lr_shift_pause: true,
             hotkey_convert: "ctrl+alt+z".to_string(),
@@ -173,7 +177,6 @@ pub struct Processor {
     // Injection state
     injecting: bool,
     queued_events: Vec<RawEvent>,
-    injecting_until: f64,
 
     /// Parsed manual-convert hotkey (`None` = only double-tap Shift).
     hotkey: Option<Hotkey>,
@@ -185,8 +188,13 @@ pub struct Processor {
     // Live fix state
     live_fix_last: String,
     word_edited: bool,
+    /// The current word starts a sentence (first word, or after `. ! ?`).
+    word_at_sentence_start: bool,
     #[allow(dead_code)] // parity with Python (bookkeeping only)
     last_real_key_at: f64,
+
+    // Repeated unknown words seen at word boundaries (`word` → hits).
+    seen_words: HashMap<String, u8>,
 
     // App context
     front_app_class: String,
@@ -247,12 +255,13 @@ impl Processor {
             pressed: HashSet::new(),
             injecting: false,
             queued_events: Vec::new(),
-            injecting_until: 0.0,
             hotkey,
             pending_convert: false,
             live_fix_last: String::new(),
             word_edited: false,
+            word_at_sentence_start: false,
             last_real_key_at: 0.0,
+            seen_words: HashMap::new(),
             front_app_class: String::new(),
             front_app_mode: "default".to_string(),
             auto_paused: false,
@@ -306,7 +315,7 @@ impl Processor {
     pub fn refresh_front_app(&mut self, now: f64) {
         let cls = self.focus.get_class_at(now, false);
         if cls != self.front_app_class {
-            debug!("Focus changed: {:?}", cls);
+            debug!("Focus changed");
         }
         self.front_app_class = cls.clone();
         self.front_app_mode = self.exceptions.get_mode(&cls).to_string();
@@ -326,10 +335,6 @@ impl Processor {
 
         if self.injecting {
             self.queued_events.push(ev);
-            return Vec::new();
-        }
-
-        if now < self.injecting_until {
             return Vec::new();
         }
 
@@ -653,6 +658,15 @@ impl Processor {
 
         // Regular character
         if let Some(c) = char {
+            if self.buf.text().is_empty() {
+                let text = self.sentence.text();
+                let trimmed = text.trim_end();
+                self.word_at_sentence_start = trimmed.is_empty()
+                    || trimmed.ends_with('.')
+                    || trimmed.ends_with('!')
+                    || trimmed.ends_with('?')
+                    || trimmed.ends_with('\n');
+            }
             self.buf.add(kc, c);
             self.sentence.append(&c.to_string());
             self.last_real_key_at = now;
@@ -673,8 +687,10 @@ impl Processor {
                     let converted = self.layout_set.convert(&word, &self.layout, &target);
                     if self.anti_resonance.allow(&word, &converted, now) {
                         info!(
-                            "AUDIT: Mid-word converting '{}' ({}) -> {}",
-                            word, self.layout, target
+                            "AUDIT: Mid-word conversion ({}) -> {} ({} chars)",
+                            self.layout,
+                            target,
+                            word.chars().count()
                         );
                         self.replace_text(
                             &word,
@@ -709,7 +725,7 @@ impl Processor {
 
         if self.should_skip_auto() {
             debug!(
-                "auto-skip {word:?}: paused={} front_app={:?} mode={}",
+                "auto-skip: paused={} front_app={:?} mode={}",
                 self.auto_paused, self.front_app_class, self.front_app_mode
             );
             return;
@@ -721,7 +737,7 @@ impl Processor {
             && now - self.layout_changed_at < self.config.no_correct_after_switch
         {
             debug!(
-                "auto-skip {word:?}: layout changed {:.2}s ago (guard {:.2}s)",
+                "auto-skip: layout changed {:.2}s ago (guard {:.2}s)",
                 now - self.layout_changed_at,
                 self.config.no_correct_after_switch
             );
@@ -757,8 +773,10 @@ impl Processor {
                 return;
             }
             info!(
-                "AUDIT: Converting '{}' ({}) -> {}",
-                word, self.layout, target
+                "AUDIT: Conversion ({}) -> {} ({} chars)",
+                self.layout,
+                target,
+                word.chars().count()
             );
             self.replace_text(
                 word,
@@ -774,7 +792,86 @@ impl Processor {
                 now,
                 ps_core::text::changed_char_count(word, &converted) as i64,
             );
-            debug!("auto-detected {:?} → {:?}", word, converted);
+            debug!(
+                "auto-detected ({} chars) -> ({} chars)",
+                word.chars().count(),
+                converted.chars().count()
+            );
+            return;
+        }
+
+        // No layout conversion: try a conservative spelling correction in the
+        // current language.  Same undo/stat/retype path, no layout switch.
+        if self.config.spell_check {
+            if let Some(fix) =
+                self.layout_set
+                    .correct_spelling(word, &self.layout, self.word_at_sentence_start)
+            {
+                info!(
+                    "AUDIT: Autocorrect ({} -> {} chars)",
+                    word.chars().count(),
+                    fix.chars().count()
+                );
+                self.replace_text(
+                    word,
+                    &fix,
+                    None,
+                    separator_kc,
+                    separator_shift,
+                    false,
+                    now,
+                    actions,
+                );
+                self.stats
+                    .record_auto_at(now, ps_core::text::changed_char_count(word, &fix) as i64);
+                return;
+            }
+        }
+
+        // Neither converted nor corrected: a word the user keeps typing is
+        // vocabulary, not a typo.  After a few sightings it is protected.
+        self.observe_word(word);
+    }
+
+    /// Learn repeated unknown words (user jargon, names) so neither the layout
+    /// gate nor autocorrect touches them again.  `words.json` is written once,
+    /// when the word crosses [`AUTO_LEARN_HITS`].
+    fn observe_word(&mut self, word: &str) {
+        if !self.config.self_learning {
+            return;
+        }
+        let lower = word.to_lowercase();
+        let len = lower.chars().count();
+        if !(3..=40).contains(&len) || !lower.chars().all(|c| c.is_alphabetic()) {
+            return;
+        }
+        if self.layout_set.is_exception(&lower)
+            || self.layout_set.is_known_word(&lower, &self.layout)
+            || self.layout_set.is_keyboard_run(&lower, &self.layout)
+        {
+            return;
+        }
+        // Only learn words the current layout can type; a Cyrillic word typed
+        // in EN is a wrong-layout word, not vocabulary.
+        if lower
+            .chars()
+            .any(|c| self.layout_set.char_to_keycode(c, &self.layout).is_none())
+        {
+            return;
+        }
+        if self.seen_words.len() >= AUTO_LEARN_TRACKED_MAX {
+            self.seen_words.clear();
+        }
+        let hits = self.seen_words.entry(lower.clone()).or_default();
+        *hits += 1;
+        if *hits >= AUTO_LEARN_HITS {
+            self.seen_words.remove(&lower);
+            self.layout_set.add_learned(&lower);
+            info!(
+                "AUDIT: learned word ({} chars, used {} times)",
+                lower.chars().count(),
+                AUTO_LEARN_HITS
+            );
         }
     }
 
@@ -789,7 +886,11 @@ impl Processor {
         now: f64,
         actions: &mut Vec<Action>,
     ) {
-        info!("AUDIT: Snippet '{trigger}' -> '{expansion}'");
+        info!(
+            "AUDIT: Snippet expansion ({} -> {} chars)",
+            trigger.chars().count(),
+            expansion.chars().count()
+        );
 
         self.injecting = true;
         self.queued_events.clear();
@@ -928,17 +1029,17 @@ impl Processor {
     }
 
     /// Python `_replace_text`'s `finally` block: replay queued physical
-    /// events, then start the 50 ms blackout.
+    /// events.  No post-injection blackout: dropping events there also dropped
+    /// key releases, which left keys stuck down (and kept GNOME's
+    /// "disable touchpad while typing" active).
     fn end_injection(&mut self, now: f64, actions: &mut Vec<Action>) {
         let to_replay: Vec<RawEvent> = self.queued_events.drain(..).collect();
         self.injecting = false;
-        self.injecting_until = 0.0;
         for ev in to_replay {
             if ev.type_ == EV_KEY {
                 actions.extend(self.on_event(ev, now));
             }
         }
-        self.injecting_until = now + INJECTION_COOLDOWN;
     }
 
     // ── manual convert (double-shift) ───────────────────────────────────
@@ -1002,7 +1103,12 @@ impl Processor {
         };
 
         let converted = self.layout_set.convert(&text, &self.layout, &target);
-        debug!("manual convert {:?} ({} → {})", text, self.layout, target);
+        debug!(
+            "manual conversion ({} -> {}) ({} chars)",
+            self.layout,
+            target,
+            text.chars().count()
+        );
         // When only the last word is converted we must retype the whole
         // sentence prefix so the cursor lands in the right place.
         if self.config.manual_only_last_word {
@@ -1047,8 +1153,10 @@ impl Processor {
             && original.chars().count() >= 2
         {
             self.layout_set.add_learned(original);
-            info!("AUDIT: learned word '{original}' (user reverted)");
-            info!("Learned word: {:?}", original);
+            info!(
+                "AUDIT: learned word ({} chars, user reverted)",
+                original.chars().count()
+            );
         }
     }
 

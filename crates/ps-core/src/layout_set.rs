@@ -10,8 +10,13 @@
 //! 5. a word that is valid in the current language needs stronger evidence;
 //! 6. an unknown target word is accepted only when the typed text is not a
 //!    keyboard run (`fghjkl`, `zxcvbnm`) — this keeps technical terms absent
-//!    from the 20k vocabulary ("plugin", "раскладка") convertible.
+//!    from the 20k vocabulary ("plugin", "раскладка") convertible;
+//! 7. a word in neither vocabulary is also accepted when the typed form is
+//!    implausible in the current language and the re-mapped form is plausible
+//!    in the target language (Russian IT jargon typed in the EN layout:
+//!    `фронтенд`, `плагин`, `сниппет`).
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
 
@@ -31,9 +36,44 @@ pub const WORD_LOGPROB_FLOOR: f64 = -13.0;
 /// vocabulary: n-grams alone need slightly stronger evidence (blocks `lrkf`,
 /// keeps `plugin`).
 pub const UNKNOWN_TARGET_MARGIN: f64 = 0.3;
+/// Absolute target n-gram floor for a word that is in neither vocabulary.
+/// Calibrated on the EN/RU profiles: Russian words typed in the EN layout sit
+/// above it (`фронтенд` -11.1, `плагин` -11.3, `сниппет` -11.9, `бэкенд` -12.3)
+/// while valid English technical terms remapped to Russian stay below -13.5.
+/// shortcut: calibrated on EN/RU profiles, recalibrate if they change.
+pub const UNKNOWN_TARGET_FLOOR: f64 = -12.5;
+/// Minimum gain for the absolute-floor path.
+pub const UNKNOWN_TARGET_MIN_GAIN: f64 = 1.5;
+/// The typed form must also be implausible in the current language.  Valid
+/// English words absent from the vocabulary score around -8..-12, so this keeps
+/// them from flipping to a spurious Russian n-gram match.
+pub const UNKNOWN_SOURCE_CEILING: f64 = -12.0;
+/// `live_fix` asks for a 15.0 gain to mean "overwhelming evidence"; the
+/// absolute-floor path must not lower that explicit bar.
+const ABSOLUTE_FLOOR_MAX_THRESHOLD: f64 = 10.0;
 
 pub const DEFAULT_THRESHOLD: f64 = 2.5;
 pub const DEFAULT_MIN_WORD_LEN: usize = 3;
+
+// Relative likelihoods for the single edit that turned the intended word into
+// what the user typed.  Corrected typing errors are overwhelmingly single
+// edits (91.8% in Tachibana 2016); substitutions dominate, and roughly a third
+// of corrected errors are adjacent-key slips (Pinet & Nozari 2022; Kukich
+// 1992).  A non-adjacent consonant swap is usually a different word
+// (`coding` → `coming`), not a typo, so it is kept below MIN_EDIT_WEIGHT.
+const EDIT_ADJACENT: f64 = 1.0;
+const EDIT_VOWEL: f64 = 0.6;
+const EDIT_TRANSPOSE: f64 = 0.85;
+/// The typed word is missing a letter (`helo` → `hello`).
+const EDIT_OMISSION: f64 = 0.8;
+/// The typed word has an extra letter (`helllo` → `hello`).
+const EDIT_INSERTION: f64 = 0.6;
+/// Same row, two keys apart.
+const EDIT_NEAR: f64 = 0.35;
+const EDIT_FAR: f64 = 0.05;
+/// Below this the edit is too unlikely to be a typo even when the result is a
+/// common word.
+const MIN_EDIT_WEIGHT: f64 = 0.1;
 
 /// Python's `str.isupper()`: at least one cased character and every cased
 /// character is uppercase.  Titlecase letters (Lt) count as cased-not-upper,
@@ -178,10 +218,175 @@ impl LayoutSet {
         true
     }
 
+    /// Conservative single-edit autocorrect for a word in `lang`.
+    ///
+    /// Only alphabetic words of 4+ characters that are unknown in the
+    /// vocabulary are considered.  Candidates are ranked by vocabulary
+    /// frequency plus a keyboard-aware error prior: adjacent-key
+    /// substitutions and transpositions are likely, non-adjacent consonant
+    /// substitutions are not (they usually mean the typed word is jargon or
+    /// another real word).  The replacement must be a known word at least as
+    /// common as the vocabulary median, with no ambiguous second candidate
+    /// (1.5× frequency margin).  Learned/exception words and keyboard runs are
+    /// never touched.  Returns the corrected word with the original leading
+    /// capital preserved.
+    pub fn correct_spelling(
+        &mut self,
+        word: &str,
+        lang: &str,
+        sentence_start: bool,
+    ) -> Option<String> {
+        let chars: Vec<char> = word.to_lowercase().chars().collect();
+        if !(4..=24).contains(&chars.len()) || !chars.iter().all(|c| c.is_alphabetic()) {
+            return None;
+        }
+        // Mid-sentence capitals are names/acronyms (`Groq` → `Grow`); a
+        // leading capital is only accepted at a sentence start (`Thsi` →
+        // `This`).  All-caps is rejected by both branches.
+        let mut first = true;
+        for c in word.chars() {
+            if c.is_uppercase() && (!first || !sentence_start) {
+                return None;
+            }
+            first = false;
+        }
+        let lower: String = chars.iter().collect();
+        if self.words.is_exception(&lower)
+            || self.ngram.is_known_word(&lower, lang)
+            || self.is_keyboard_run(&lower, lang)
+        {
+            return None;
+        }
+
+        let cutoff = self.ngram.word_cutoff(lang)?;
+        let alphabet = self.maps.alphabet(lang);
+        let n = chars.len();
+        let mut candidates: HashMap<String, f64> = HashMap::new();
+        let mut add = |candidate: String, weight: f64| {
+            candidates
+                .entry(candidate)
+                .and_modify(|old| *old = old.max(weight))
+                .or_insert(weight);
+        };
+
+        // Edits at position 0 are skipped: technical words often start with an
+        // extra letter (`uinput` → `input`), and first-letter typos are rare.
+        for i in 1..n {
+            let mut w = chars.clone();
+            w.remove(i);
+            add(w.iter().collect(), EDIT_INSERTION);
+
+            for &a in &alphabet {
+                if a != chars[i] {
+                    let mut w = chars.clone();
+                    w[i] = a;
+                    add(
+                        w.iter().collect(),
+                        self.substitution_weight(chars[i], a, lang),
+                    );
+                }
+                let mut w = chars.clone();
+                w.insert(i, a);
+                let doubled = chars.get(i.wrapping_sub(1)) == Some(&a) || chars.get(i) == Some(&a);
+                add(
+                    w.iter().collect(),
+                    if doubled {
+                        EDIT_OMISSION + 0.1
+                    } else {
+                        EDIT_OMISSION
+                    },
+                );
+            }
+        }
+        for &a in &alphabet {
+            let mut w = chars.clone();
+            w.push(a);
+            add(
+                w.iter().collect(),
+                if chars.last() == Some(&a) {
+                    EDIT_OMISSION + 0.1
+                } else {
+                    EDIT_OMISSION
+                },
+            );
+        }
+        for i in 0..n.saturating_sub(1) {
+            if chars[i] != chars[i + 1] {
+                let mut w = chars.clone();
+                w.swap(i, i + 1);
+                add(w.iter().collect(), EDIT_TRANSPOSE);
+            }
+        }
+
+        let cutoff_log = cutoff.ln();
+        let mut ranked: Vec<(f64, f64, String)> = candidates
+            .into_iter()
+            .filter(|(c, weight)| {
+                c.chars().count() >= 3 && c != &lower && *weight >= MIN_EDIT_WEIGHT
+            })
+            .filter_map(|(c, weight)| {
+                self.ngram
+                    .word_logprob(&c, lang)
+                    .filter(|logp| *logp >= cutoff_log)
+                    .map(|logp| (logp + weight.ln(), weight, c))
+            })
+            .collect();
+        ranked.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.2.cmp(&b.2)));
+        let (best_score, best_weight, best_word) = ranked.first()?;
+        if let Some((second_score, _, _)) = ranked.get(1) {
+            if *best_score - *second_score < 1.5f64.ln() {
+                debug!(
+                    "autocorrect ambiguous ({} -> {} chars) weight={best_weight:.2} margin={:.2}",
+                    word.chars().count(),
+                    best_word.chars().count(),
+                    *best_score - *second_score
+                );
+                return None;
+            }
+        }
+
+        let mut out = String::with_capacity(best_word.len());
+        for (i, c) in best_word.chars().enumerate() {
+            if i == 0 && word.chars().next().is_some_and(char::is_uppercase) {
+                out.extend(c.to_uppercase());
+            } else {
+                out.push(c);
+            }
+        }
+        debug!(
+            "autocorrect candidate ({} -> {} chars) ({lang}, weight={best_weight:.2})",
+            word.chars().count(),
+            out.chars().count()
+        );
+        Some(out)
+    }
+
+    /// Prior for a single-character substitution, based on the physical
+    /// keyboard distance and the vowel/consonant class.
+    fn substitution_weight(&mut self, typed: char, intended: char, lang: &str) -> f64 {
+        let typed_key = self.maps.char_to_keycode(typed, lang);
+        let intended_key = self.maps.char_to_keycode(intended, lang);
+        if let (Some((typed_kc, _)), Some((intended_kc, _))) = (typed_key, intended_key) {
+            if let (Some(a), Some(b)) = (key_position(typed_kc), key_position(intended_kc)) {
+                if keys_adjacent(a, b) {
+                    return EDIT_ADJACENT;
+                }
+                if a.0 == b.0 && a.1.abs_diff(b.1) == 2 {
+                    return EDIT_NEAR;
+                }
+            }
+        }
+        if is_vowel(typed) && is_vowel(intended) {
+            EDIT_VOWEL
+        } else {
+            EDIT_FAR
+        }
+    }
+
     /// True when consecutive characters sit on adjacent keys of one keyboard
     /// row (`fghjkl`, `zxcvbnm`, `vbnm`).  Such runs give high n-gram gains but
     /// are mashing, not words.
-    fn is_keyboard_run(&mut self, word: &str, layout: &str) -> bool {
+    pub fn is_keyboard_run(&mut self, word: &str, layout: &str) -> bool {
         let mut prev: Option<(u8, u8)> = None;
         let mut pairs = 0usize;
         let mut adjacent = 0usize;
@@ -292,11 +497,17 @@ impl LayoutSet {
         min_word_len: usize,
     ) -> Option<String> {
         if self.is_exception(word) {
-            debug!("gate: {word:?} is a learned word/exception");
+            debug!(
+                "gate: learned word/exception ({} chars)",
+                word.chars().count()
+            );
             return None;
         }
         if !Self::is_eligible(word, min_word_len) {
-            debug!("gate: {word:?} ineligible (min_word_len={min_word_len})");
+            debug!(
+                "gate: ineligible ({} chars, min_word_len={min_word_len})",
+                word.chars().count()
+            );
             return None;
         }
 
@@ -311,6 +522,7 @@ impl LayoutSet {
 
         let mut best: Option<&str> = None;
         let mut best_gain = 0.0f64;
+        let mut best_target_score = f64::NEG_INFINITY;
         let mut best_converted = String::new();
 
         for other in &self.layouts {
@@ -319,26 +531,48 @@ impl LayoutSet {
             }
             let converted = self.maps.convert(word, current_layout, other);
             let cp = Prepared::new(&converted);
-            let gain = self.decision_score_prepared(&cp, other) - current_score;
+            let target_score = self.decision_score_prepared(&cp, other);
+            let gain = target_score - current_score;
             if gain > best_gain {
                 best_gain = gain;
+                best_target_score = target_score;
                 best = Some(other);
                 best_converted = converted;
             }
         }
 
-        let best = best?;
+        let best = best?.to_string();
+        let priority_pair = matches!((current_layout, best.as_str()), ("en", "ru") | ("ru", "en"));
 
         // Words containing characters that are punctuation here but letters in
-        // another layout (',' is 'б') only convert when the re-mapped form is a
-        // real word of the target language — protects "don't" / "v1.2".
+        // another layout (',' is 'б', '.' is 'ю') only convert when the
+        // re-mapped form is a real word of the target language — protects
+        // "don't" / "v1.2".
         if !py_is_alpha(word) {
-            if self.is_known_word(&best_converted, best) && best_gain >= threshold.max(2.5) {
-                return Some(best.to_string());
+            let target_known = self.is_known_word(&best_converted, &best);
+            if target_known && best_gain >= threshold.max(2.5) {
+                return Some(best);
+            }
+            // A Russian word typed in the EN layout keeps ','/'.' where the
+            // user meant 'б'/'ю'.  When the whole re-mapped form is letters,
+            // treat it as a wrong-layout word rather than punctuation; real
+            // punctuation words ("don't", "e.g.") stay below the floor.
+            if best_converted.chars().all(|c| c.is_alphabetic())
+                && threshold < ABSOLUTE_FLOOR_MAX_THRESHOLD
+                && self.plausible_unknown_target(
+                    word,
+                    &best_converted,
+                    &best,
+                    priority_pair,
+                    (current_score, best_target_score, best_gain),
+                )
+            {
+                return Some(best);
             }
             debug!(
-                "gate: {word:?} has punctuation; {best_converted:?} known={} gain={best_gain:.2}",
-                self.is_known_word(&best_converted, best)
+                "gate: punctuation ({} -> {} chars) known={target_known} gain={best_gain:.2}",
+                word.chars().count(),
+                best_converted.chars().count()
             );
             return None;
         }
@@ -346,42 +580,90 @@ impl LayoutSet {
         // A valid word of the current language needs much stronger evidence.
         if current_known {
             let required = (threshold + 1.5).max(3.5);
-            let target_known = self.is_known_word(&best_converted, best);
+            let target_known = self.is_known_word(&best_converted, &best);
             if !(target_known && best_gain >= required) {
                 debug!(
-                    "gate: {word:?} is a known {current_layout} word; \
-                     {best_converted:?} known_in_{best}={target_known} \
-                     gain={best_gain:.2} required={required:.2}"
+                    "gate: known {current_layout} word ({} -> {} chars); \
+                     known_in_{best}={target_known} gain={best_gain:.2} \
+                     required={required:.2}",
+                    word.chars().count(),
+                    best_converted.chars().count()
                 );
                 return None;
             }
         } else {
-            let target_known = self.is_known_word(&best_converted, best);
+            let target_known = self.is_known_word(&best_converted, &best);
             if target_known {
                 if best_gain < threshold {
                     debug!(
-                        "gate: {word:?} unknown in {current_layout}; \
-                         {best_converted:?} known_in_{best} but gain={best_gain:.2} \
-                         threshold={threshold:.2}"
+                        "gate: unknown in {current_layout} ({} -> {} chars); \
+                         known_in_{best} but gain={best_gain:.2} \
+                         threshold={threshold:.2}",
+                        word.chars().count(),
+                        best_converted.chars().count()
                     );
                     return None;
                 }
-            } else if best_gain < threshold + UNKNOWN_TARGET_MARGIN || keyboard_run {
+            } else if keyboard_run
+                || (best_gain < threshold + UNKNOWN_TARGET_MARGIN
+                    && (threshold >= ABSOLUTE_FLOOR_MAX_THRESHOLD
+                        || !self.plausible_unknown_target(
+                            word,
+                            &best_converted,
+                            &best,
+                            priority_pair,
+                            (current_score, best_target_score, best_gain),
+                        )))
+            {
                 // The 20k vocabulary misses technical terms, names and rare
                 // inflections.  With no vocabulary hit on either side, n-gram
                 // evidence decides — but keyboard runs ("fghjkl",
                 // "zxcvbnm", "vbn") produce high n-gram gains for adjacent
                 // keys and must never flip the layout.
                 debug!(
-                    "gate: {word:?} unknown in {current_layout}; \
-                     {best_converted:?} unknown_in_{best} gain={best_gain:.2} \
-                     threshold={threshold:.2} keyboard_run={keyboard_run}"
+                    "gate: unknown in {current_layout} ({} -> {} chars); \
+                     unknown_in_{best} gain={best_gain:.2} \
+                     target={best_target_score:.2} source={current_score:.2} \
+                     threshold={threshold:.2} keyboard_run={keyboard_run}",
+                    word.chars().count(),
+                    best_converted.chars().count()
                 );
                 return None;
             }
         }
 
-        Some(best.to_string())
+        Some(best)
+    }
+
+    /// Accept a word that is in neither vocabulary when the typed form is
+    /// implausible in the current language and the re-mapped form is plausible
+    /// in the target language.
+    ///
+    /// Russian IT jargon absent from the 20k list (`фронтенд`, `плагин`,
+    /// `сниппет`) has too small a relative gain, but the absolute scores are
+    /// decisive.  A length floor and the target keyboard-run check keep
+    /// mashing (`lrkf` → `дкла`) out.
+    fn plausible_unknown_target(
+        &mut self,
+        typed: &str,
+        converted: &str,
+        target_layout: &str,
+        priority_pair: bool,
+        (source_score, target_score, gain): (f64, f64, f64),
+    ) -> bool {
+        // The absolute floors are calibrated on the EN/RU profiles; the other
+        // six layouts keep the old relative-gain gate.
+        priority_pair
+            && source_score <= UNKNOWN_SOURCE_CEILING
+            && target_score >= UNKNOWN_TARGET_FLOOR
+            && gain >= UNKNOWN_TARGET_MIN_GAIN
+            // Wrong-layout Russian maps Russian vowels to Latin consonants
+            // (`а`→f, `о`→j), so the typed form cannot be required to contain
+            // a vowel.  The length floor keeps short mashing (`lrkf` → `дкла`)
+            // out; the target must still look pronounceable.
+            && typed.chars().count() >= 5
+            && converted.chars().any(is_vowel)
+            && !self.is_keyboard_run(converted, target_layout)
     }
 }
 
@@ -398,6 +680,63 @@ fn key_position(kc: u32) -> Option<(u8, u8)> {
         }
     }
     None
+}
+
+/// True when two letter keys touch (including the QWERTY stagger between
+/// rows).
+fn keys_adjacent(a: (u8, u8), b: (u8, u8)) -> bool {
+    match a.0.abs_diff(b.0) {
+        0 => a.1.abs_diff(b.1) == 1,
+        1 => a.1.abs_diff(b.1) <= 1,
+        _ => false,
+    }
+}
+
+/// Vowel class for the languages PowerSwitcher ships profiles for.  Used only
+/// as a soft prior: vowel↔vowel slips (`campare` → `compare`) are more likely
+/// than a far consonant swap.
+fn is_vowel(c: char) -> bool {
+    let c = c.to_lowercase().next().unwrap_or(c);
+    matches!(
+        c,
+        'a' | 'e'
+            | 'i'
+            | 'o'
+            | 'u'
+            | 'y'
+            | 'а'
+            | 'е'
+            | 'ё'
+            | 'и'
+            | 'о'
+            | 'у'
+            | 'ы'
+            | 'э'
+            | 'ю'
+            | 'я'
+            | 'і'
+            | 'ї'
+            | 'є'
+            | 'ä'
+            | 'ö'
+            | 'ü'
+            | 'é'
+            | 'è'
+            | 'ê'
+            | 'ë'
+            | 'à'
+            | 'â'
+            | 'î'
+            | 'ï'
+            | 'ô'
+            | 'û'
+            | 'ù'
+            | 'œ'
+            | 'æ'
+            | 'ą'
+            | 'ę'
+            | 'ó'
+    )
 }
 
 #[cfg(test)]
@@ -449,6 +788,54 @@ mod tests {
             ls.find_best_layout("ghbdtn", "en", DEFAULT_THRESHOLD, DEFAULT_MIN_WORD_LEN),
             Some("ru".into())
         );
+    }
+
+    #[test]
+    fn spell_correction_is_conservative() {
+        let mut ls = test_set();
+        assert_eq!(
+            ls.correct_spelling("привт", "ru", true).as_deref(),
+            Some("привет")
+        );
+        assert_eq!(
+            ls.correct_spelling("Привт", "ru", true).as_deref(),
+            Some("Привет")
+        );
+        assert_eq!(
+            ls.correct_spelling("wprld", "en", true).as_deref(),
+            Some("world")
+        );
+        // Transpositions and adjacent-key substitutions are the common typos.
+        assert_eq!(
+            ls.correct_spelling("recieve", "en", true).as_deref(),
+            Some("receive")
+        );
+        assert_eq!(
+            ls.correct_spelling("campare", "en", true).as_deref(),
+            Some("compare")
+        );
+        // Known words, abbreviations, technical terms and ambiguous edits stay.
+        assert_eq!(ls.correct_spelling("привет", "ru", true), None);
+        assert_eq!(ls.correct_spelling("ЛИНУКС", "ru", true), None);
+        assert_eq!(ls.correct_spelling("linux", "en", true), None);
+        assert_eq!(
+            ls.correct_spelling("тект", "ru", true).as_deref(),
+            Some("текст")
+        );
+        assert_eq!(ls.correct_spelling("ghbdtn", "en", true), None);
+        // An unknown word one far consonant edit from a common word is not a
+        // typo (`coding` → `coming`), and a mid-sentence capital is a name
+        // (`Groq` → `Grow`).
+        assert_eq!(ls.correct_spelling("coding", "en", true), None);
+        assert_eq!(ls.correct_spelling("Groq", "en", false), None);
+        // A Russian typo must reach the autocorrect branch, not become EN gibberish.
+        assert_eq!(
+            ls.find_best_layout("превет", "ru", DEFAULT_THRESHOLD, DEFAULT_MIN_WORD_LEN),
+            None
+        );
+        // Learned words are protected.
+        ls.add_exception("привт");
+        assert_eq!(ls.correct_spelling("привт", "ru", true), None);
     }
 
     #[test]
@@ -507,6 +894,45 @@ mod tests {
                 "{word:?} typed as {typed:?} must convert back"
             );
         }
+    }
+
+    #[test]
+    fn l2_russian_tech_terms_convert() {
+        // Russian IT jargon absent from the 20k vocabulary.  `б`/`ю` arrive
+        // as ','/'.' in the EN layout, which used to hit the punctuation gate.
+        let mut ls = test_set();
+        for (word, typed) in [
+            ("разработка", "hfphf,jnrf"),
+            ("переключение", "gthtrk.xtybt"),
+            ("фронтенд", "ahjyntyl"),
+            ("плагин", "gkfuby"),
+            ("сниппет", "cybggtn"),
+            ("браузер", ",hfepth"),
+            ("бэкенд", ",'rtyl"),
+        ] {
+            assert_eq!(
+                ls.convert(typed, "en", "ru"),
+                word,
+                "{typed:?} should map to {word:?}"
+            );
+            assert_eq!(
+                ls.find_best_layout(typed, "en", DEFAULT_THRESHOLD, DEFAULT_MIN_WORD_LEN)
+                    .as_deref(),
+                Some("ru"),
+                "{word:?} typed as {typed:?} must convert"
+            );
+        }
+        // The same rules must not flip correctly typed English technical terms.
+        for word in ["backend", "frontend", "switcher", "plugin", "typescript"] {
+            assert_eq!(
+                ls.find_best_layout(word, "en", DEFAULT_THRESHOLD, DEFAULT_MIN_WORD_LEN),
+                None,
+                "{word:?} must stay English"
+            );
+        }
+        // Mid-word eager conversion asks for an overwhelming 15.0 gain; the
+        // absolute-floor path must not lower that bar.
+        assert_eq!(ls.find_best_layout("ahjyntyl", "en", 15.0, 4), None);
     }
 
     #[test]

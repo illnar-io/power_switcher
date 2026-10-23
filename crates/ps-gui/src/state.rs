@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use ps_core::fsutil::{harden_private_dir, write_private};
 use ps_daemon::config::{default_config_dir, Config};
 
 /// Layout ids with shipped keycode tables and n-gram profiles.
@@ -24,6 +25,7 @@ pub struct GuiState {
 impl GuiState {
     /// Load `config.toml` (`PS_CONFIG`, else `~/.config/power_switcher/`).
     pub fn load() -> Result<Self, String> {
+        harden_private_dir(&default_config_dir());
         let config_path = config_path();
         let config = Config::load(&config_path)?;
         let snippets_path = config
@@ -90,21 +92,7 @@ pub fn parse_layouts(raw: &str) -> Result<Vec<String>, String> {
 /// Write `text` to `path` via a sibling temp file so a crash cannot leave a
 /// half-written config behind.
 pub fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-        }
-    }
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("config.toml");
-    let tmp = path.with_file_name(format!(".{file_name}.tmp"));
-    std::fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("{}: {e}", path.display())
-    })
+    write_private(path, text.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 #[cfg(test)]

@@ -34,39 +34,111 @@ Like Punto Switcher / Caramba Switcher / Keyboop, but for Linux Wayland.
 - **Guard after layout switch**: Optionally skip corrections for N seconds after
   the layout changes, so manual switching is not fought by the detector.
 - **Statistics**: Counts conversions, snippet expansions and undos.
-- **Settings GUI**: `ps gui` (GTK4, `ps-gui`) or the legacy
-  `python -m power_switcher gui` (tkinter); both edit the same files.
+- **Settings GUI**: `power-switcher gui` (GTK4, `power-switcher-gui`) or the
+  legacy `python -m power_switcher gui` (tkinter); both edit the same files.
 
 
 ## Requirements
 
-- Linux Wayland session (X11 also works for the daemon; focus detection uses `xdotool`)
-- Python 3.11+
-- `python-evdev`, `click` (Python packages)
-- User in `input` group
-- Optional: `paplay` (conversion sound), `tkinter` (settings GUI),
-  `gnome-extension/` (per-app exceptions on GNOME)
+- Modern Linux releases only: Fedora 44+, Ubuntu 24.04+, Debian 13+, current
+  Arch/openSUSE.  No LTS or old-release support.
+- Wayland session (X11 works for the daemon; focus detection uses `xdotool`).
+- GTK 4.10+ for the settings GUI.
+- Access to `/dev/input/event*` and `/dev/uinput` through udev `uaccess`.
+  The rule loads before systemd's seat rule and pins internal keyboards to
+  `seat0`; the `input` group is a fallback for systems without logind/uaccess.
+- No Python runtime is needed for the installed app.
 
-## Quick start
+## Install
+
+The installed commands are `power-switcher` (daemon/CLI) and
+`power-switcher-gui` (GTK4 settings).  They are not called `ps`/`ps-gui` because
+`/usr/bin/ps` belongs to procps; cargo build artifacts keep the short names.
+
+### Universal installer
 
 ```bash
-# 1. Install dependencies
-pip install .
-
-# 2. Setup permissions and config
-python -m power_switcher setup
-
-# 3. Build n-gram profiles (optional, built-in fallbacks provided)
-python -m power_switcher.detection.build_profiles
-
-# 4. Run daemon
-python -m power_switcher daemon --verbose
+curl -fsSL https://github.com/illnar-io/power_switcher/releases/latest/download/install.sh | sh
 ```
 
-### Rust daemon and native GUI
+Or download and inspect it first:
 
-The production daemon is the Rust port in `crates/`; the Python tree remains the
-reference implementation and the profile generator.
+```bash
+curl -fsSLO https://github.com/illnar-io/power_switcher/releases/latest/download/install.sh
+less install.sh
+sh install.sh
+```
+
+It installs under `~/.local`, adds the udev rule and `uinput` module file with
+sudo/pkexec, installs the systemd user unit, and installs the GNOME helper when
+GNOME is detected.  It relies on udev `uaccess` and does **not** add you to the
+`input` group by default; use `--add-group` only if `uaccess` is unavailable.
+Use `--no-udev`, `--no-service`, `--no-gnome`, or `--uninstall` as needed.  See
+[`packaging/README.md`](packaging/README.md) for details.
+
+### Native packages
+
+Download the artifact for your distro from
+[Releases](https://github.com/illnar-io/power_switcher/releases):
+
+```bash
+# Fedora / openSUSE
+sudo dnf install ./power-switcher-*.rpm
+
+# Debian / Ubuntu
+sudo apt install ./power-switcher_*.deb
+
+# Arch
+sudo pacman -U power-switcher-*.pkg.tar.zst
+```
+
+Then log out and back in if the daemon cannot open the keyboard, and start it:
+
+```bash
+systemctl --user enable --now power_switcher.service
+power-switcher gui
+```
+
+### AppImage
+
+The AppImage uses the host GTK 4.10+ runtime and is a portable/try-it option.
+The daemon still needs the udev `uaccess` rule, so run the installer once for
+that, or use a native package.
+
+```bash
+chmod +x PowerSwitcher-*.AppImage
+./PowerSwitcher-*.AppImage
+```
+
+### Privacy and security
+
+PowerSwitcher runs entirely locally. It has no network code, no telemetry and
+no cloud sync. It reads keyboards through evdev because that is the only
+Wayland-independent way to detect wrong-layout typing.
+
+Data stays under `~/.config/power_switcher/`:
+
+- `config.toml`, `snippets.json`, `words.json`, `exceptions.json`, `stats.json`.
+- Files are created `0600` and the directory `0700`; existing files are
+  tightened on load. Writes are atomic (sibling temp file + rename).
+- Typed words and snippet contents are **not** written to logs. Audit lines
+  contain only layout names, lengths and counters.
+- Snippets are stored in plaintext. Do not put passwords, private keys or
+  recovery codes in a snippet.
+- The installer uses udev `uaccess`; `--add-group` is an explicit fallback that
+  grants broader keyboard access to the `input` group.
+- Release tarballs are checked against `SHA256SUMS`; missing checksums fail
+  closed. Set `COSIGN_IDENTITY` to verify the signed checksum in CI. Native
+  packages are not GPG-signed yet.
+
+A process running as your user can read your files and the keyboard; no
+user-space app can defend against a compromised session. Use full-disk
+encryption, a locked screen and trusted packages for that boundary.
+
+### From source
+
+The production daemon is the Rust port in `crates/`; the Python tree remains
+the reference implementation and the profile generator.
 
 ```bash
 cargo build --release -p ps-daemon -p ps-gui
@@ -81,29 +153,19 @@ Applications, Words, Status). It edits `config.toml` and the JSON stores
 directly — same file contract as the CLI — and has no daemon IPC, so settings
 apply after a daemon restart (the Status tab has a restart button).
 
-Requirements for the GUI: GTK 4.10+ development headers (`gtk4-devel` on
-Fedora, `libgtk-4-dev` on Debian/Ubuntu).
+Build requirements: Rust and GTK 4.10+ development headers (`gtk4-devel` on
+Fedora, `libgtk-4-dev` on Debian/Ubuntu).  The packaging scripts expect
+`nfpm` and `appimagetool` only when building native packages or an AppImage.
 
-### Install (user-local systemd service)
+### Python reference implementation
 
 ```bash
-cargo build --release -p ps-daemon -p ps-gui
-install -Dm755 target/release/ps      ~/.local/bin/ps
-install -Dm755 target/release/ps-gui  ~/.local/bin/ps-gui
-
-# data next to the binary (~/.local/bin/ps → ~/.local/share/power_switcher)
-mkdir -p ~/.local/share/power_switcher/profiles
-cp power_switcher/detection/profiles/*.json.gz ~/.local/share/power_switcher/profiles/
-cp crates/ps-core/data/layouts.json            ~/.local/share/power_switcher/
-
-install -Dm644 systemd/power_switcher.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now power_switcher
+pip install .
+python -m power_switcher setup
+python -m power_switcher daemon --verbose
 ```
 
-The Status tab's **Install service** button does the unit part for you (writing
-`ExecStart` for the `ps` it finds); `PS_PROFILES_DIR` / `PS_LAYOUTS_JSON`
-override the data locations.
+`PS_PROFILES_DIR` / `PS_LAYOUTS_JSON` override the data locations.
 
 ## Hotkeys
 
@@ -318,6 +380,7 @@ gnome-extension/             # optional GNOME Shell helper for per-app exception
 data/frequency/              # reference word-frequency lists (profile source)
 crates/                      # Rust port: ps-core, ps-input, ps-layout, ps-focus,
                              # ps-engine, ps-daemon (`ps`), ps-gui (GTK4, `ps-gui`)
+packaging/                   # installer, nfpm, AppImage, native package metadata
 docs/REVERSE_ENGINEERING.md  # how the reference apps were analysed
 ```
 
@@ -333,8 +396,8 @@ docs/REVERSE_ENGINEERING.md  # how the reference apps were analysed
 ## Development
 
 ```bash
-PYTHONPATH=. pytest          # 111 tests
-PYTHONPATH=. python3 -m pytest -q
+cargo test --workspace
+PYTHONPATH=. pytest          # Python reference implementation
 ```
 
 ## License

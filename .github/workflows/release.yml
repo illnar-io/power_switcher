@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+            nfpm_asset: nfpm_2.48.0_Linux_x86_64.tar.gz
+            appimage_asset: appimagetool-x86_64.AppImage
+            appimage_sha256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            nfpm_asset: nfpm_2.48.0_Linux_arm64.tar.gz
+            appimage_asset: appimagetool-aarch64.AppImage
+            appimage_sha256: f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-4-dev libudev-dev pkg-config imagemagick librsvg2-bin \
+            squashfs-tools desktop-file-utils
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+
+      - name: Install nfpm
+        run: |
+          curl -fsSLo /tmp/nfpm.tar.gz \
+            "https://github.com/goreleaser/nfpm/releases/download/v2.48.0/${{ matrix.nfpm_asset }}"
+          curl -fsSLo /tmp/nfpm-checksums.txt \
+            "https://github.com/goreleaser/nfpm/releases/download/v2.48.0/checksums.txt"
+          (cd /tmp && grep "  ${{ matrix.nfpm_asset }}$" nfpm-checksums.txt | sha256sum -c -)
+          tar -xzf /tmp/nfpm.tar.gz -C /tmp nfpm
+          sudo install -m755 /tmp/nfpm /usr/local/bin/nfpm
+
+      - name: Install appimagetool
+        env:
+          APPIMAGETOOL_SHA256: ${{ matrix.appimage_sha256 }}
+        run: |
+          curl -fsSLo /tmp/appimagetool \
+            "https://github.com/AppImage/appimagetool/releases/download/1.9.1/${{ matrix.appimage_asset }}"
+          echo "$APPIMAGETOOL_SHA256  /tmp/appimagetool" | sha256sum -c -
+          chmod +x /tmp/appimagetool
+
+      - name: Set version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release artifacts
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          APPIMAGETOOL: /tmp/appimagetool
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: ./packaging/build-release.sh
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dist-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          rm -f SHA256SUMS
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Sign checksums (keyless)
+        run: cosign sign-blob --yes --bundle dist/SHA256SUMS.bundle dist/SHA256SUMS
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/*
+          generate_release_notes: true

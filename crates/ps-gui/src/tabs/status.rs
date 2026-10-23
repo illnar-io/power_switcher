@@ -56,7 +56,11 @@ fn daemon_state() -> String {
             return "running (systemd unit power_switcher.service)".to_string();
         }
     }
-    for pattern in ["[p]s daemon", "[p]ower_switcher daemon"] {
+    for pattern in [
+        "[p]ower-switcher daemon",
+        "[p]s daemon",
+        "[p]ower_switcher daemon",
+    ] {
         if let Some(procs) = output("pgrep", &["-af", pattern]) {
             if let Some(first) = procs.lines().next() {
                 return format!("running (not under systemd): {first}");
@@ -85,21 +89,36 @@ fn config_home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"))
 }
 
-/// `ps` for `ExecStart`: the unit-usable path plus the file to verify.
-/// Prefers the installed binary, then the one next to this GUI.
+/// Daemon names in preference order.  `power-switcher` is the installed name;
+/// `ps` is the cargo build artifact and the legacy user-local name.
+const DAEMON_NAMES: [&str; 2] = ["power-switcher", "ps"];
+
+/// `power-switcher` for `ExecStart`: the unit-usable path plus the file to
+/// verify.  Prefer the binary next to this GUI, then a user-local install,
+/// then a system package.  Never fall back to `/usr/bin/ps` — that is procps.
 fn ps_binary() -> Option<(String, PathBuf)> {
-    if let Some(home) = std::env::var_os("HOME") {
-        let installed = PathBuf::from(home).join(".local/bin/ps");
-        if installed.is_file() {
-            return Some(("%h/.local/bin/ps".to_string(), installed));
-        }
-    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let sibling = dir.join("ps");
-            if sibling.is_file() {
-                return Some((sibling.display().to_string(), sibling));
+            for name in DAEMON_NAMES {
+                let sibling = dir.join(name);
+                if sibling.is_file() {
+                    return Some((sibling.display().to_string(), sibling));
+                }
             }
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        for name in DAEMON_NAMES {
+            let installed = PathBuf::from(&home).join(".local/bin").join(name);
+            if installed.is_file() {
+                return Some((format!("%h/.local/bin/{name}"), installed));
+            }
+        }
+    }
+    for path in ["/usr/bin/power-switcher", "/usr/local/bin/power-switcher"] {
+        let installed = PathBuf::from(path);
+        if installed.is_file() {
+            return Some((path.to_string(), installed));
         }
     }
     None
@@ -396,9 +415,10 @@ impl StatusTab {
         };
         let Some((exec, _)) = ps_binary() else {
             self.message.set_text(
-                "Cannot find the `ps` binary next to ps-gui or in ~/.local/bin.\n\
-                 Build it with `cargo build --release -p ps-daemon -p ps-gui` (or install `ps` \
-                 into ~/.local/bin) and try again.",
+                "Cannot find the `power-switcher` binary next to power-switcher-gui, in \
+                 ~/.local/bin, or in /usr/bin.\n\
+                 Install the package or build it with \
+                 `cargo build --release -p ps-daemon -p ps-gui` and try again.",
             );
             return;
         };
@@ -478,5 +498,13 @@ impl StatusTab {
                 }
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn prefers_installed_daemon_name() {
+        assert_eq!(super::DAEMON_NAMES, ["power-switcher", "ps"]);
     }
 }

@@ -16,11 +16,12 @@
 //!   values are skipped (Python would only crash later in `_canonical`).
 
 use std::collections::HashMap;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use log::{info, warn};
+
+use crate::fsutil::{read_private, write_private};
 
 /// Layout-independent canonical form: interpret keystrokes as if in the EN
 /// layout, then lowercase.  So `!test`, `!TEST`, `!еуые` all become the same
@@ -67,7 +68,7 @@ impl SnippetStore {
     /// pairs or a `{trigger: expansion}` map (sorted by key, like Python's
     /// `sorted(data.items())`).
     fn load(&mut self) {
-        let Ok(text) = fs::read_to_string(&self.path) else {
+        let Ok(text) = read_private(&self.path) else {
             return;
         };
         let data: serde_json::Value = match serde_json::from_str(&text) {
@@ -119,13 +120,8 @@ impl SnippetStore {
     /// Write `pairs` to disk in Python's `json.dumps(..., indent=2)` shape: a
     /// pretty-printed array of two-element arrays.
     fn persist(&self) -> io::Result<()> {
-        if let Some(parent) = self.path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)?;
-            }
-        }
         let json = serde_json::to_string_pretty(&self.pairs)?;
-        fs::write(&self.path, json)
+        write_private(&self.path, json.as_bytes())
     }
 
     /// Return the expansion if `typed_word` matches a snippet trigger.
@@ -150,7 +146,11 @@ impl SnippetStore {
             .push((trigger.to_string(), expansion.to_string()));
         self.index.insert(canon, expansion.to_string());
         self.persist()?;
-        info!("Snippet added: {trigger} → {expansion}");
+        info!(
+            "Snippet added ({} -> {} chars)",
+            trigger.chars().count(),
+            expansion.chars().count()
+        );
         Ok(())
     }
 
@@ -165,7 +165,7 @@ impl SnippetStore {
         if removed {
             self.index.remove(&canon);
             self.persist()?;
-            info!("Snippet removed: {trigger}");
+            info!("Snippet removed ({} chars)", trigger.chars().count());
         }
         Ok(removed)
     }
@@ -215,6 +215,7 @@ pub fn ru_to_en_map(layouts_json: &Path) -> io::Result<HashMap<char, char>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn test_maps() -> HashMap<char, char> {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/layouts.json");

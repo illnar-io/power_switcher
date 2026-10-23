@@ -14,7 +14,7 @@
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use log::{error, info};
 
@@ -42,7 +42,7 @@ struct Executor {
     /// Shared with the GNOME backend (Super+Space injection uses the same
     /// virtual device, exactly like Python's `set_uinput`).
     vk: Arc<Mutex<VirtualKeyboard>>,
-    backend: Box<dyn LayoutBackend>,
+    backend: Arc<Mutex<Box<dyn LayoutBackend + Send>>>,
 }
 
 impl Executor {
@@ -78,7 +78,7 @@ impl Executor {
                 std::thread::sleep(Duration::from_millis(*ms));
             }
             Action::SetLayout { index } => {
-                self.backend.set_layout(*index);
+                self.backend.lock().unwrap().set_layout(*index);
             }
             Action::Sound { name } => play_sound(name),
         }
@@ -137,7 +137,7 @@ fn spawn_reader(
 }
 
 /// Run the daemon (Python `KeyProcessor.run`).  Returns after a stop signal.
-pub fn run(mut processor: Processor, backend: Box<dyn LayoutBackend>, trace: bool) -> ! {
+pub fn run(mut processor: Processor, backend: Box<dyn LayoutBackend + Send>, trace: bool) -> ! {
     // ── keyboard discovery (Python `_find_keyboards` + grab) ────────────
     let keyboards = find_keyboards();
     if keyboards.is_empty() {
@@ -159,6 +159,7 @@ pub fn run(mut processor: Processor, backend: Box<dyn LayoutBackend>, trace: boo
     // GNOME switching injects Super+Space through the same virtual device.
     let mut backend = backend;
     backend.set_virtual_keyboard(vk.clone());
+    let backend = Arc::new(Mutex::new(backend));
 
     let (tx, rx) = mpsc::channel::<RawEvent>();
     let stop = Arc::new(AtomicBool::new(false));
@@ -185,7 +186,7 @@ pub fn run(mut processor: Processor, backend: Box<dyn LayoutBackend>, trace: boo
     }
 
     // Initial layout sync (Python: `real_idx = backend.get_current_index()`).
-    let real_idx = backend.get_current_index();
+    let real_idx = backend.lock().unwrap().get_current_index();
     if let Some(layout) = processor.layout_set.layouts.get(real_idx) {
         let layout = layout.clone();
         processor.set_layout_state(&layout);
@@ -212,19 +213,43 @@ pub fn run(mut processor: Processor, backend: Box<dyn LayoutBackend>, trace: boo
         });
     }
 
+    // Top-bar tray.  Non-fatal: the daemon must keep converting without one.
+    let _tray = crate::tray::spawn(stop.clone());
+
     info!("daemon running — Ctrl+C to stop");
 
     // ── main loop ────────────────────────────────────────────────────────
-    let mut executor = Executor { vk, backend };
-    let mut last_layout_sync = Instant::now();
+    let mut executor = Executor {
+        vk,
+        backend: backend.clone(),
+    };
+
+    // Manual layout switches (Super+Space) never reach us — the compositor
+    // consumes them.  Poll the real layout on a worker thread so a 4 ms
+    // `g3kb-switch` fork never stalls key delivery in the main loop.
+    let current_layout_index = Arc::new(std::sync::atomic::AtomicUsize::new(real_idx));
+    {
+        let backend = backend.clone();
+        let current = current_layout_index.clone();
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                std::thread::sleep(LAYOUT_SYNC_INTERVAL);
+                // Never wait for a conversion that is switching the layout.
+                let index = match backend.try_lock() {
+                    Ok(mut backend) => backend.get_current_index(),
+                    Err(_) => continue,
+                };
+                current.store(index, Ordering::Relaxed);
+            }
+        });
+    }
+
+    let mut applied_layout = real_idx;
     'main: loop {
-        // Manual layout switches (Super+Space) never reach us — the
-        // compositor consumes them.  Re-read the *real* layout periodically,
-        // otherwise every word is decoded with a stale layout and detection
-        // silently does the wrong thing.
-        if last_layout_sync.elapsed() >= LAYOUT_SYNC_INTERVAL {
-            last_layout_sync = Instant::now();
-            let index = executor.backend.get_current_index();
+        let index = current_layout_index.load(Ordering::Relaxed);
+        if index != applied_layout {
+            applied_layout = index;
             if let Some(layout) = processor.layout_set.layouts.get(index).cloned() {
                 if processor.layout() != layout {
                     info!("AUDIT: external layout change → {layout}");

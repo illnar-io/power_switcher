@@ -146,6 +146,10 @@ class LayoutSet:
             }, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        try:
+            self._exceptions_path.chmod(0o600)
+        except OSError:
+            pass
 
     # ── password heuristic ──────────────────────────────────────────────
 
@@ -288,8 +292,8 @@ class LayoutSet:
                 threshold, 2.5
             ):
                 logger.debug(
-                    "detect %r (%s) -> %r (%s) gain=%.2f (punctuated)",
-                    word, current_layout, best_converted, best, best_gain,
+                    "detect (%d -> %d chars) (%s) -> %s gain=%.2f (punctuated)",
+                    len(word), len(best_converted), current_layout, best, best_gain,
                 )
                 return best
             return None
@@ -315,8 +319,8 @@ class LayoutSet:
             return None
 
         logger.debug(
-            "detect %r (%s) -> %r (%s) gain=%.2f",
-            word, current_layout, best_converted, best, best_gain,
+            "detect (%d -> %d chars) (%s) -> %s gain=%.2f",
+            len(word), len(best_converted), current_layout, best, best_gain,
         )
         return best
 

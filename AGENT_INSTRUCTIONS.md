@@ -88,7 +88,7 @@ power_switcher/
 ├── systemd/
 │   └── power_switcher.service
 ├── udev/
-│   └── 99-power_switcher.rules
+│   └── 60-power_switcher.rules
 └── tests/
     ├── test_char_maps.py
     ├── test_detector.py
@@ -103,13 +103,11 @@ power_switcher/
 # Install system packages
 sudo dnf install -y python3-evdev python3-dasbus wl-clipboard ydotool g3kb-switch
 
-# Add user to input group (REQUIRES RE-LOGIN after this)
-sudo usermod -aG input $USER
-
 # udev rules for /dev/uinput and /dev/input/event*
-sudo tee /etc/udev/rules.d/99-power_switcher.rules << 'EOF'
-KERNEL=="uinput",   SUBSYSTEM=="misc",  GROUP="input", MODE="0660"
-KERNEL=="event*",   SUBSYSTEM=="input", GROUP="input", MODE="0660"
+sudo tee /etc/udev/rules.d/60-power_switcher.rules << 'EOF'
+KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", TAG+="uaccess", OPTIONS+="static_node=uinput"
+KERNEL=="event*", SUBSYSTEM=="input", ENV{ID_INPUT_KEYBOARD}=="1", GROUP="input", MODE="0660", TAG+="uaccess"
+KERNEL=="event*", SUBSYSTEM=="input", ENV{ID_INPUT_KEYBOARD}=="1", ENV{ID_SEAT}=="", ENV{ID_SEAT}="seat0"
 EOF
 sudo udevadm control --reload-rules
 sudo udevadm trigger

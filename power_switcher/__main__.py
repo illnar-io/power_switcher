@@ -8,12 +8,16 @@ import click
 from evdev import ecodes as e
 
 from .config import Config
-from .core.key_processor import KeyProcessor
+from .core.key_processor import KeyProcessor, configure_audit_log
 from .core.snippets import SnippetStore
 from .core.app_exceptions import ExceptionStore
 from .core.stats import Stats
 from .layout.detector import detect_layout_backend
 from .maps.layout_set import LayoutSet
+
+# User data (snippets, learned words, stats, config) must not be readable by
+# other local accounts.  The Rust daemon applies the same mode explicitly.
+os.umask(0o077)
 
 
 @click.group()
@@ -31,6 +35,7 @@ def daemon(config, verbose, no_auto):
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
+    configure_audit_log()
     cfg = Config.load(os.path.expanduser(config))
     backend = detect_layout_backend()
 
@@ -97,6 +102,10 @@ def setup():
     config_path = Path("~/.config/power_switcher/config.toml").expanduser()
     if not config_path.exists():
         config_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            config_path.parent.chmod(0o700)
+        except OSError:
+            pass
         with open(config_path, "w") as f:
             f.write(
                 '[general]\n'
@@ -130,13 +139,19 @@ def setup():
                 'words = 0\n'
                 'seconds = 3.0\n'
             )
+        try:
+            config_path.chmod(0o600)
+        except OSError:
+            pass
         click.echo(f"Created default config at {config_path}")
 
-    click.echo("\nTo allow running without sudo, add these udev rules to /etc/udev/rules.d/99-power_switcher.rules:")
-    click.echo('KERNEL=="uinput", GROUP="input", MODE="0660"')
-    click.echo('KERNEL=="event*", GROUP="input", MODE="0660"')
+    click.echo("\nTo allow running without sudo, add these udev rules to /etc/udev/rules.d/60-power_switcher.rules:")
+    click.echo('KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", TAG+="uaccess", OPTIONS+="static_node=uinput"')
+    click.echo('KERNEL=="event*", SUBSYSTEM=="input", ENV{ID_INPUT_KEYBOARD}=="1", GROUP="input", MODE="0660", TAG+="uaccess"')
+    click.echo('KERNEL=="event*", SUBSYSTEM=="input", ENV{ID_INPUT_KEYBOARD}=="1", ENV{ID_SEAT}=="", ENV{ID_SEAT}="seat0"')
     click.echo("\nThen run: sudo udevadm control --reload-rules && sudo udevadm trigger")
-    click.echo("And ensure your user is in the 'input' group: sudo usermod -aG input $USER")
+    click.echo("Log out and back in so udev uaccess applies to your session.")
+    click.echo("Only if that still fails: sudo usermod -aG input $USER")
 
 
 @cli.command()

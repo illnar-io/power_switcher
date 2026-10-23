@@ -2,10 +2,74 @@
 
 use gtk::prelude::*;
 
+use std::process::Command;
+
 use ps_daemon::Config;
 
 use crate::state::parse_layouts;
 use crate::ui;
+
+/// systemd user unit written by the Status tab.
+const SERVICE_UNIT: &str = "power_switcher.service";
+
+fn service_state() -> String {
+    Command::new("systemctl")
+        .args(["--user", "is-enabled", SERVICE_UNIT])
+        .output()
+        .map(|out| {
+            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if stdout.is_empty() {
+                String::from_utf8_lossy(&out.stderr).trim().to_string()
+            } else {
+                stdout
+            }
+        })
+        .unwrap_or_else(|err| format!("systemctl unavailable: {err}"))
+}
+
+fn autostart_enabled() -> bool {
+    matches!(service_state().as_str(), "enabled" | "enabled-runtime")
+}
+
+fn toggle_autostart() -> Result<(), String> {
+    let args: &[&str] = if autostart_enabled() {
+        &["--user", "disable", SERVICE_UNIT]
+    } else {
+        &["--user", "enable", "--now", SERVICE_UNIT]
+    };
+    let out = Command::new("systemctl")
+        .args(args)
+        .output()
+        .map_err(|err| err.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            format!("systemctl exited with {}", out.status)
+        } else {
+            stderr
+        })
+    }
+}
+
+fn refresh_autostart(button: &gtk::Button, status: &gtk::Label) {
+    let state = service_state();
+    let enabled = matches!(state.as_str(), "enabled" | "enabled-runtime");
+    button.set_label(if enabled {
+        "Disable autostart"
+    } else {
+        "Enable autostart"
+    });
+    button.set_sensitive(state != "not-found");
+    let text = match state.as_str() {
+        "enabled" | "enabled-runtime" => "Enabled — starts with your login.".to_string(),
+        "disabled" => "Disabled — does not start with your login.".to_string(),
+        "not-found" => "Not installed — use Status → Install service.".to_string(),
+        other => format!("State: {other}"),
+    };
+    status.set_text(&text);
+}
 
 pub struct SettingsTab {
     pub root: gtk::ScrolledWindow,
@@ -26,6 +90,7 @@ pub struct SettingsTab {
 
     arrows_cancel: gtk::Switch,
     live_fix_enabled: gtk::Switch,
+    spell_check: gtk::Switch,
     lr_shift_pause: gtk::Switch,
     shift_tap_switch_layout: gtk::Switch,
     manual_only_last_word: gtk::Switch,
@@ -129,6 +194,7 @@ impl SettingsTab {
         let grid = ui::form();
         let arrows_cancel = switch(config.arrows_cancel);
         let live_fix_enabled = switch(config.live_fix_enabled);
+        let spell_check = switch(config.spell_check);
         let lr_shift_pause = switch(config.lr_shift_pause);
         let shift_tap_switch_layout = switch(config.shift_tap_switch_layout);
         let manual_only_last_word = switch(config.manual_only_last_word);
@@ -137,33 +203,37 @@ impl SettingsTab {
         let no_correct_after_switch = spin(0.0, 10.0, 0.1, 1, config.no_correct_after_switch);
         ui::row(&grid, 0, "Arrow keys cancel detection", &arrows_cancel);
         ui::row(&grid, 1, "Live (mid-word) fix", &live_fix_enabled);
-        ui::row(&grid, 2, "L+R Shift pauses auto-detect", &lr_shift_pause);
+        ui::row(&grid, 2, "Autocorrect misspelled words", &spell_check);
+        ui::row(&grid, 3, "L+R Shift pauses auto-detect", &lr_shift_pause);
         ui::row(
             &grid,
-            3,
+            4,
             "Lone Shift tap switches layout (legacy)",
             &shift_tap_switch_layout,
         );
         ui::row(
             &grid,
-            4,
+            5,
             "Hotkey converts only the last word",
             &manual_only_last_word,
         );
         ui::row(
             &grid,
-            5,
-            "Learn the word when a conversion is undone",
+            6,
+            "Learn words from usage (undo + repeats)",
             &self_learning,
         );
-        ui::row(&grid, 6, "Sound feedback", &sound_enabled);
+        ui::row(&grid, 7, "Sound feedback", &sound_enabled);
         ui::row(
             &grid,
-            7,
+            8,
             "Ignore auto-detect after a layout switch (s)",
             &no_correct_after_switch,
         );
         content.append(&grid);
+        content.append(&ui::hint(
+            "Autocorrect only applies to unknown words with one plausible common replacement; words in the Words tab are never touched. Unknown words used three times are learned automatically.",
+        ));
         content.append(&ui::hint(
             "Leave the lone-Shift gesture off: your desktop already switches layouts with Super+Space.",
         ));
@@ -203,6 +273,31 @@ impl SettingsTab {
              restart.",
         ));
 
+        // ── System ──────────────────────────────────────────────────────
+        content.append(&ui::section("System"));
+        let autostart_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let autostart = gtk::Button::new();
+        let autostart_status = gtk::Label::new(None);
+        autostart_status.set_xalign(0.0);
+        autostart_status.set_wrap(true);
+        autostart_status.set_opacity(0.75);
+        autostart_row.append(&autostart);
+        autostart_row.append(&autostart_status);
+        content.append(&autostart_row);
+        refresh_autostart(&autostart, &autostart_status);
+        {
+            let button = autostart.clone();
+            let status = autostart_status.clone();
+            autostart.connect_clicked(move |_| match toggle_autostart() {
+                Ok(()) => refresh_autostart(&button, &status),
+                Err(err) => status.set_text(&format!("Failed: {err}")),
+            });
+        }
+        content.append(&ui::hint(
+            "Autostart is the systemd user unit power_switcher.service. Enabling starts the \
+             daemon now; disabling leaves the running daemon alone (tray → Exit stops it).",
+        ));
+
         Self {
             root,
             layouts,
@@ -220,6 +315,7 @@ impl SettingsTab {
             snippet_tab,
             arrows_cancel,
             live_fix_enabled,
+            spell_check,
             lr_shift_pause,
             shift_tap_switch_layout,
             manual_only_last_word,
@@ -264,6 +360,7 @@ impl SettingsTab {
 
         config.arrows_cancel = self.arrows_cancel.is_active();
         config.live_fix_enabled = self.live_fix_enabled.is_active();
+        config.spell_check = self.spell_check.is_active();
         config.lr_shift_pause = self.lr_shift_pause.is_active();
         config.shift_tap_switch_layout = self.shift_tap_switch_layout.is_active();
         config.manual_only_last_word = self.manual_only_last_word.is_active();

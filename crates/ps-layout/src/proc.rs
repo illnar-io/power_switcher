@@ -10,9 +10,10 @@ use std::io::Read;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// Poll interval while waiting for the child (10 ms — finer than any of the
-/// Python timeouts, coarse enough to be cheap).
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// Poll interval while waiting for the child.  The helper commands finish in a
+/// few milliseconds; a 10 ms poll added that much latency to every layout read
+/// and switch.
+const POLL_INTERVAL: Duration = Duration::from_millis(1);
 
 /// Outcome of a timed run: captured stdout plus, when the process exited in
 /// time, whether it succeeded.

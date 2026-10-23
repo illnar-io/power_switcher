@@ -1,6 +1,7 @@
 # PowerSwitcher — Rust Migration Handoff
 
-*Written: 2026-10-18, after Phase 2 completion. All work is committed to `main`.*
+*Written: 2026-10-18, after Phase 2 completion.  Earlier phases are committed;
+the packaging work in section 19 is currently uncommitted.*
 
 ## What this project is
 
@@ -27,7 +28,7 @@ model format, workspace layout, and "don't convert" regexes).
 | 4. Yofikator/autocorrect/model | ❌ not started |
 | 5. Native GUI (ps-gui) | ✅ done — GTK4, 5 tabs, `ps gui` |
 
-Test counts: **Rust 174** (`cargo test --workspace`), **Python 138**
+Test counts: **Rust 205** (`cargo test --workspace`), **Python 139**
 (`PYTHONPATH=. python3 -m pytest -q`). Both must stay green; clippy/fmt clean.
 
 ### Phase 3 status (what works today)
@@ -397,3 +398,256 @@ bug, documented in the code).
      converts. Python and Rust kept in sync; parity data re-exported unchanged.
    Tests: 184 Rust (new hotkey parser + Ctrl+Alt+Z replay + extra-modifier
    passthrough + keyboard-run/technical-term tests), 138 Python, clippy/fmt clean.
+
+### 13. Stuck key / dead touchpad after a conversion (2026-10-20)
+
+   - Symptom: the G key stopped producing text and the touchpad stopped
+     working while the daemon ran; both recovered after stopping the service.
+   - End-to-end probe (fake keyboard → daemon → virtual device → xev) proved
+     the daemon forwarded G correctly, so the key was stuck, not dropped.
+   - Root cause: the 50 ms post-injection "blackout" (`injecting_until`,
+     ported from Python) returned `Vec::new()` for **every** event, including
+     key **releases**.  A key held across a conversion could be emitted as a
+     press and have its release discarded, leaving it down in the compositor;
+     GNOME's disable-touchpad-while-typing then kept the touchpad off as long
+     as the key was held.
+   - Fix: removed the blackout in `ps-engine` and the Python mirror.  Queued
+     events are still replayed; nothing is dropped.  Regression test
+     `events_right_after_injection_are_not_dropped` replaces the old
+     `post_injection_cooldown_drops_events`.
+   - Also removed the temporary `RUST_LOG` systemd drop-in.
+   Tests: 184 Rust, 138 Python, parity 2/2, clippy/fmt clean; release rebuilt
+   and installed, service restarted.
+
+### 14. Native Rust tray (2026-10-20)
+
+   - The tray is part of the daemon: `crates/ps-daemon/src/tray.rs` implements
+     `ksni::Tray` (StatusNotifierItem, blocking API); GNOME's AppIndicator
+     extension hosts it.  Started from `daemon::run`, so the icon appears and
+     disappears with the service and there is no extra process/autostart.
+   - Menu: **Settings** (`ps gui`) and **Restart daemon**
+     (`systemctl --user restart power_switcher`).  Settings runs through
+     `systemd-run --user` in its own unit: children of the daemon share its
+     service cgroup and would be killed by a daemon restart.  Restart uses
+     `--no-block` because the `systemctl` client itself lives in that cgroup.
+   - `ps gui` resolves the sibling `ps-gui`, keeping GTK out of the daemon.
+   - `assume_sni_available(true)` makes the tray wait for
+     `org.kde.StatusNotifierWatcher` when the user service starts before the
+     shell; without a session bus / SNI host the tray is disabled but the
+     daemon keeps converting (`warn!`, not fatal).
+   - `ksni = "0.3"` with the `blocking` feature (pulls tokio + zbus); the tray
+     test asserts the menu labels.
+   - **Exit** item: stops the tray-launched settings window
+     (`power_switcher_gui.service`) and raises the daemon stop flag, so the
+     normal shutdown path (stats save, ungrabbed keyboards) runs and no orphan
+     SNI icon stays behind. Verified live: daemon → inactive, gui → inactive,
+     0 tray items, journal `shutting down`, `start` brings it back.
+   - Settings → System section: **Enable/Disable autostart** toggles the systemd
+     user unit power_switcher.service (`enable --now` / `disable`; the unit is
+     `WantedBy=graphical-session.target`). Disabling leaves the running daemon
+     alone. The button is insensitive while the unit is not installed (Status →
+     Install service).
+   - The earlier PyGObject helper (`tools/ps_tray.py`), its autostart entry and
+     the installed copy were removed — one less runtime dependency.
+   - Remaining Python: the reference implementation/parity suite and the
+     `snippets`/`exceptions`/`words`/`stats` CLI subcommands (the GUI already
+     edits the same files).
+
+### 15. Wrong-layout words not converting + autocorrect (2026-10-22)
+
+   - Symptom: `ghbdtn` and `руддщ` came back unchanged.  Journal showed the
+     conversion was detected, then `set_layout(ru)` used **simulated
+     Super+Space**, which GNOME 45+ ignores, so the retyped text used the old
+     layout's keycodes and read back as the same word.
+   - Root cause: `GnomeBackend` probed the available switch mechanism **once at
+     startup**.  At `graphical-session.target` the shell has not exported
+     `g3kb-switch`/the helper extension yet, so the probe latched on
+     `Simulated` forever.
+   - Fix: the GNOME backend now tries `g3kb-switch` → bundled
+     `org.power_switcher.Layout` → simulated Super+Space **on every call**;
+     the `GnomeSwitch` enum/latch is gone.  Verified live: `g3kb-switch -s`
+     switches; the daemon's 250 ms poll logs `external layout change → ru/en`
+     from the real source (dconf was stale).
+   - Autocorrect: opt-out `spell_check = true` (`[general]`), Settings →
+     Behaviour → "Autocorrect misspelled words".  On a word boundary, when no
+     layout conversion fires, `LayoutSet::correct_spelling` looks for a
+     single-edit neighbour (insert/delete/transpose/substitute) in the current
+     language's vocabulary.  Guards: 4+ alphabetic chars, not known, not a
+     learned/exception word, not a keyboard run, edits at position 0 are
+     ignored, candidate must be at least the vocabulary median probability and
+     1.5× the runner-up, leading capital preserved.  Uses the normal
+     `replace_text` path, so undo (double Shift / Ctrl+Alt+Z) and stats work.
+   - Tests: new `spell_correction_is_conservative` (py-core), RU→EN
+     `руддщ`/hello replay, `wprld`→world autocorrect replay.  193 Rust, 138
+     Python, clippy/fmt clean; release rebuilt/installed and the service
+     restarted.
+
+### 16. Vocabulary learning from repeated usage (2026-10-22)
+
+   - `self_learning` already protected a word the user reverted with undo
+     (double Shift / Ctrl+Alt+Z).  It now also learns the user's own
+     vocabulary: an unknown word that survives the layout gate and autocorrect
+     is counted at each word boundary, and the third sighting adds it to
+     `learned_words` (`words.json` written once, so it persists).
+   - Guards mirror autocorrect: 3–40 alphabetic chars, typable in the current
+     layout, not a known/exception/learned word, not a keyboard run.  Counts
+     live in memory (`seen_words`, capped at 4096) — only the learned word is
+     persisted, so a restart at two sightings just starts counting again.
+   - This is opt-out through the same switch; Settings label is now "Learn
+     words from usage (undo + repeats)".
+   - Tests: `repeated_unknown_word_is_learned_and_protected`,
+     `known_and_wrong_layout_words_are_not_auto_learned`.  195 Rust, 138
+     Python, clippy/fmt clean.
+
+### 17. Typing-latency measurement (2026-10-22)
+
+   - Repro:
+     `cargo test --release -p ps-engine --test latency -- --ignored --nocapture`
+     (`crates/ps-engine/tests/latency.rs`; no real keystrokes are injected).
+   - Processor CPU is negligible: 0.7 µs/keystroke plain, 1.1 µs with the
+     full app, 2.5 µs per known word boundary, ~47 µs per unknown word
+     (autocorrect candidate scan), ~50 µs when autocorrect fires.
+   - The dominant delay is deliberate pacing in `replace_text`: 10 ms per
+     erase event, 10 ms per typed key press/release, 5 ms per Shift, 100 ms
+     after a layout switch.  Measured budget: **170 ms per autocorrect** and
+     **300 ms per layout conversion** (sleeps only, before uinput writes).
+   - Periodic backend work: focus query was 10.4 ms once per real second;
+     layout poll 4.2 ms every 250 ms, both on the main event loop.  Fixed:
+     subprocess poll interval 10 ms → 1 ms (focus 10.4 → 5.3 ms, layout helper
+     4.2 → 3.5 ms) and layout polling moved to a worker thread, so key
+     delivery never waits for `g3kb-switch`.
+   - Journal also showed autocorrect false positives (`coding` → `coming`,
+     `Groq` → `Grow`): each costs a 170 ms freeze plus a manual retype.
+     Pacing reduction / uppercase guard are the next speed levers; both need
+     a live typing test before shipping.
+
+### 18. L2 Russian-English mistypes → switching gate (2026-10-22)
+
+   - Research: RILEC/REALEC treat **transliteration** (Russian words written
+     in Latin letters) as a core Russian-L1 interference type; Russian IT
+     discourse code-switches English technical terms constantly.  A CHI 2019
+     Korean-English field study found **78% of dual-language mode errors
+     happen immediately after application switching** (future lever: refresh
+     focus/layout sooner on app change; not implemented here).
+   - Probe of the current gate: English technical terms typed in the RU layout
+     (`backend`, `plugin`, `config`, `kubernetes`) already convert.  Russian
+     words typed in the EN layout failed for `переключение`, `разработка`,
+     `фронтенд`, `плагин`, `сниппет`, `браузер`, `бэкенд`.  Two causes:
+     `ю`/`б` arrive as `.`/`,` and hit the strict punctuation branch, and
+     pure-alpha unknown targets missed the `threshold + 0.3` (2.8) margin.
+   - Fix in `find_best_layout` (EN↔RU only; the other layouts keep the old
+     gate): an absolute-plausibility path for words in neither vocabulary —
+     target n-gram score ≥ -12.5, gain ≥ 1.5, typed score ≤ -12.0, length ≥ 5,
+     target contains a vowel, target is not a keyboard run.  The same path
+     handles layout-mapped punctuation when the whole re-mapped form is
+     letters.  A 10.0 threshold cap keeps `live_fix`'s 15.0 mid-word bar
+     intact.
+   - Why it is safe: valid English technical terms score -8..-11 in EN and
+     -13.5 or worse when remapped to RU, so the source ceiling/floor reject
+     them; `lrkf` → `дкла` has only 4 chars; `fghjkl`/`zxcvbnm` stay
+     keyboard runs.  Replay tests confirm no mid-word injection.
+   - Known remaining false positives are transliteration, not switching:
+     autocorrect still turns `servis` → `serves` and `cassa` → `cass`.  A
+     transliteration guard is the next step if users hit it.
+   - Tests: `l2_russian_tech_terms_convert` plus the existing gibberish and
+     replay suites.  200 Rust, 138 Python, clippy/fmt clean.
+
+### 19. Easy installation for modern distros (2026-10-23)
+
+   Scope: nothing older than Fedora 44, Ubuntu 24.04, Debian 13, or current
+   Arch/openSUSE.  The GUI needs GTK 4.10+; the daemon needs only glibc.
+   Packaging is for the Rust daemon/GUI; Python stays reference/parity.
+
+   - **Installed names are `power-switcher` / `power-switcher-gui`, never
+     `/usr/bin/ps`** (procps owns it). Cargo artifacts remain `ps` /
+     `ps-gui`. `cmd_gui` and the Status tab search both names, preferring the
+     installed one; the Status tab never falls back to `/usr/bin/ps`.
+   - `packaging/install.sh` is the universal user-local installer:
+     `~/.local` prefix, mandatory `SHA256SUMS` verification for downloads
+     (fails closed if absent), optional cosign/minisign signature verification,
+     udev/module install via sudo/pkexec, systemd user unit, GNOME extension
+     auto-install, and `--uninstall`.  It relies on udev `uaccess`; the
+     `input` group is only used with the explicit `--add-group` fallback.
+   - `packaging/build-release.sh` emits the tarball (versioned + unversioned
+     latest alias), `.deb`/`.rpm`/`.pkg.tar.zst` through nfpm, and an AppImage
+     when `APPIMAGETOOL` is set.  `packaging/build-appimage.sh` uses the host
+     GTK 4.10+ runtime (no bundled GTK) and an `AppRun` with `gui` by default
+     and `daemon`/`setup`/`debug` passthrough.
+   - `packaging/nfpm.yaml` installs binaries, profiles/layouts, udev rule,
+     `modules-load.d/uinput` file, user unit, desktop entry/icon, and the GNOME
+     helper.  Package scriptlets reload udev, trigger the keyboard/uinput
+     devices, and load `uinput`; they **print** the `usermod -aG input`
+     instruction instead of changing users.
+   - The udev rule grants `uaccess` (and keeps the input group as the legacy
+     fallback).  Packages and the installer do not modify group membership;
+     `--add-group` is the explicit fallback.  A login is still needed when the
+     group is added.
+   - `.github/workflows/release.yml` runs on `v*`: builds x86_64 + aarch64,
+     publishes tarballs/packages/AppImage/installer, generates `SHA256SUMS`,
+     and signs it keylessly with sigstore/cosign (`SHA256SUMS.bundle`).
+   - Verified locally (Fedora 45 x86_64): `cargo fmt --check`, clippy
+     `-D warnings`, 201 Rust tests, 138 Python tests, `sh -n`/`bash -n`,
+     `desktop-file-validate`, YAML parse.  Built and inspected
+     `/tmp/opencode/ps-dist`: tarball, valid deb/rpm/Arch packages, AppImage
+     AppDir/AppRun, and offline install/uninstall in a temp `HOME`
+     (service ExecStart, desktop Exec, config creation, cleanup).
+   - Not yet done: clean Fedora/Ubuntu/Arch VM installs; the GitHub Actions
+     workflow/aarch64 matrix has not run; no tag/release has been pushed.
+     AppImage needs FUSE, or `APPIMAGE_EXTRACT_AND_RUN=1`.  Optional Nix/KDE
+     packaging is deferred.
+
+### 20. Privacy and local-security hardening (2026-10-23)
+
+   Scope: local data at rest and log leakage.  The daemon still needs the
+   keyboard; a compromised same-user process can read the user's files and
+   type as the user.  Full-disk encryption and trusted packages are the
+   boundary outside this app.
+
+   - `crates/ps-core/src/fsutil.rs` writes all user stores atomically through
+     a sibling `tempfile` and sets files `0600`; newly created directories are
+     `0700`.  Existing files are tightened on load; symlinks are never
+     chmodded.  Used by config load/setup, snippets, words, exceptions, stats,
+     and the GTK state saver.  Tests cover modes, overwrite/temp cleanup,
+     existing-file tightening, and symlink safety.
+   - Typed words and snippet contents no longer enter logs.  Rust audit lines
+     now carry only layout names, lengths and counters; the same redaction was
+     applied to `ps-core` debug logs, anti-resonance warnings, focus/app
+     logging, and the Python reference daemon/audit log.  The old
+     `~/.cache/power_switcher/audit.log` is `0600`; existing journal entries
+     from before this change still contain typed words until rotation.
+   - Python CLI sets `umask(0o077)` and chmods config/snippet/word/stats/
+     exceptions files; the Python audit log directory/file are `0700`/`0600`.
+     The audit file logger is configured only by `power_switcher daemon`, so
+     importing the module or running the tests no longer creates a user cache
+     file (covered by `tests/test_audit_log.py`).
+   - Installer/package policy now relies on udev `uaccess`; `install.sh`
+     defaults to **not** changing group membership and `--add-group` is the
+     opt-in fallback.  `ps setup` and package post-install text say the same.
+     The rule was renamed from `99-` to `60-power_switcher.rules` because
+     systemd's `73-seat-late.rules` only applies `uaccess` to tags that exist
+     by then.  Internal (i8042) keyboards have no `ID_SEAT`, so the rule pins
+     them to `seat0`; verified `/dev/input/event2` gains `user:illnar` ACL.
+   - Both user units add conservative systemd sandboxing:
+     `NoNewPrivileges=yes`, `PrivateTmp=yes`, `ProtectSystem=full`,
+     `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`,
+     `ProtectControlGroups=yes`, `RestrictAddressFamilies=AF_UNIX AF_NETLINK`.
+     Verified the daemon still detects GNOME, grabs the keyboard and registers
+     the tray under these restrictions.
+   - Release workflow: least-privilege `GITHUB_TOKEN` (build read-only,
+     publish write), all actions pinned to commit SHAs, nfpm tarball verified
+     against the upstream `checksums.txt`, appimagetool pinned to 1.9.1 with
+     hard-coded per-arch SHA256, checksums still signed keylessly with cosign.
+   - README documents the local-only design, data locations/modes, plaintext
+     snippets warning, checksum/cosign verification, and the compromised-
+     session limit.  Snippets are not encrypted; passwords/keys/recovery codes
+     must not be stored there.
+   - Verified: 205 Rust tests, 139 Python tests, clippy `-D warnings`, fmt
+     clean, rebuilt `/tmp/opencode/ps-dist`, reinstalled the local RPM, and the
+     running `/usr/bin/power-switcher` contains the redacted audit strings.
+     Current `~/.config/power_switcher` and files are `0700`/`0600`.
+   - Remaining risk: old `journalctl --user` entries predate redaction; native
+     packages are not GPG-signed; releases rely on HTTPS plus `SHA256SUMS`
+     (optional cosign); no snippet encryption or keyring integration.  The
+     local user is still in the `input` group; the new uaccess rule was
+     verified to work without it, but membership was left because other input
+     tools may rely on it.

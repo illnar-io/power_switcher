@@ -12,6 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use log::warn;
 use serde::{Deserialize, Serialize};
 
+use crate::fsutil::{read_private, write_private};
+
 /// Minimum seconds between automatic writes (Python debounce).
 const SAVE_DEBOUNCE: f64 = 5.0;
 
@@ -49,7 +51,7 @@ impl Stats {
     pub fn load(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
         let mut data = StatsData::default();
-        if let Ok(text) = std::fs::read_to_string(&path) {
+        if let Ok(text) = read_private(&path) {
             match serde_json::from_str::<StatsData>(&text) {
                 Ok(loaded) => data = loaded,
                 Err(err) => warn!("Failed to load stats from {}: {err}", path.display()),
@@ -172,12 +174,7 @@ impl Stats {
 }
 
 fn persist(path: &Path, data: &StatsData) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
-    std::fs::write(path, serde_json::to_string_pretty(data)?)
+    write_private(path, serde_json::to_string_pretty(data)?.as_bytes())
 }
 
 #[cfg(test)]

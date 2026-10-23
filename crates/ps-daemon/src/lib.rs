@@ -7,5 +7,6 @@
 pub mod config;
 pub mod daemon;
 pub mod paths;
+mod tray;
 
 pub use config::Config;

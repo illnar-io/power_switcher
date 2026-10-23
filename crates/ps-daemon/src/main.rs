@@ -18,7 +18,7 @@ use ps_daemon::{config, daemon, Config};
 
 #[derive(Parser)]
 #[command(
-    name = "ps",
+    name = "power-switcher",
     about = "PowerSwitcher — DE-independent layout auto-switcher for Linux Wayland",
     version
 )]
@@ -49,7 +49,7 @@ enum Command {
         #[arg(long, default_value = "~/.config/power_switcher/config.toml")]
         config: String,
     },
-    /// Open the settings GUI (launches the `ps-gui` binary)
+    /// Open the settings GUI (launches the `power-switcher-gui` binary)
     Gui,
 }
 
@@ -79,16 +79,19 @@ fn main() {
     }
 }
 
-/// Launch the GTK4 settings window.  `ps-gui` is a separate binary (GTK must
+/// Launch the GTK4 settings window.  The GUI is a separate binary (GTK must
 /// not be linked into the evdev daemon); prefer the sibling build artifact,
-/// then `$PATH`.
+/// then `$PATH`.  Installed packages rename the pair to avoid clobbering the
+/// procps `ps` command.
 fn cmd_gui() -> ! {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("power-switcher-gui"));
             candidates.push(dir.join("ps-gui"));
         }
     }
+    candidates.push(PathBuf::from("power-switcher-gui"));
     candidates.push(PathBuf::from("ps-gui"));
 
     for bin in candidates {
@@ -102,11 +105,15 @@ fn cmd_gui() -> ! {
             }
         }
     }
-    eprintln!("ps-gui not found next to this binary or in $PATH (cargo build --release -p ps-gui)");
+    eprintln!(
+        "power-switcher-gui not found next to this binary or in $PATH \
+         (cargo build --release -p ps-gui)"
+    );
     std::process::exit(1);
 }
 
 fn cmd_daemon(config_path: &str, no_auto: bool, trace: bool) -> ! {
+    ps_core::fsutil::harden_private_dir(&config::default_config_dir());
     let cfg = Config::load(config::expand_tilde(config_path))
         .unwrap_or_else(|err| panic!("failed to load config {config_path}: {err}"));
 
@@ -142,6 +149,7 @@ fn cmd_daemon(config_path: &str, no_auto: bool, trace: bool) -> ! {
         developer_mode: cfg.developer_mode,
         arrows_cancel: cfg.arrows_cancel,
         live_fix_enabled: cfg.live_fix_enabled,
+        spell_check: cfg.spell_check,
         no_correct_after_switch: cfg.no_correct_after_switch,
         lr_shift_pause: cfg.lr_shift_pause,
         hotkey_convert: cfg.hotkey_convert.clone(),
@@ -200,11 +208,9 @@ fn cmd_daemon(config_path: &str, no_auto: bool, trace: bool) -> ! {
 }
 
 fn cmd_setup() {
+    ps_core::fsutil::harden_private_dir(&config::default_config_dir());
     let config_path = config::default_config_dir().join("config.toml");
     if !config_path.exists() {
-        if let Some(parent) = config_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
         let default = r#"[general]
 layouts = ["en", "ru"]
 default_layout = "en"
@@ -239,17 +245,26 @@ snippet_tab = true
 words = 0
 seconds = 3.0
 "#;
-        let _ = std::fs::write(&config_path, default);
+        let _ = ps_core::fsutil::write_private(&config_path, default.as_bytes());
         println!("Created default config at {}", config_path.display());
     }
 
     println!(
-        "\nTo allow running without sudo, add these udev rules to /etc/udev/rules.d/99-power_switcher.rules:"
+        "\nTo allow running without sudo, add these udev rules to /etc/udev/rules.d/60-power_switcher.rules:"
     );
-    println!("KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\"");
-    println!("KERNEL==\"event*\", GROUP=\"input\", MODE=\"0660\"");
+    println!(
+        "KERNEL==\"uinput\", SUBSYSTEM==\"misc\", GROUP=\"input\", MODE=\"0660\", TAG+=\"uaccess\", OPTIONS+=\"static_node=uinput\""
+    );
+    println!(
+        "KERNEL==\"event*\", SUBSYSTEM==\"input\", ENV{{ID_INPUT_KEYBOARD}}==\"1\", GROUP=\"input\", MODE=\"0660\", TAG+=\"uaccess\""
+    );
+    println!(
+        "KERNEL==\"event*\", SUBSYSTEM==\"input\", ENV{{ID_INPUT_KEYBOARD}}==\"1\", ENV{{ID_SEAT}}==\"\", ENV{{ID_SEAT}}=\"seat0\""
+    );
     println!("\nThen run: sudo udevadm control --reload-rules && sudo udevadm trigger");
-    println!("And ensure your user is in the 'input' group: sudo usermod -aG input $USER");
+    println!("Log out and back in so udev uaccess applies to your session.");
+    println!("Only if that still fails: sudo usermod -aG input $USER");
+    println!("Load the module now: sudo modprobe uinput");
 }
 
 fn cmd_debug() {

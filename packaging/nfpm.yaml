@@ -1,0 +1,76 @@
+name: power-switcher
+arch: ${NFPM_ARCH}
+platform: linux
+version: ${VERSION}
+section: utils
+priority: optional
+maintainer: Ilnar Nizametdinov <nizametdinov@gmail.com>
+description: |
+  Automatically converts text typed in the wrong keyboard layout on Linux
+  Wayland.  Grabs keyboards through evdev, injects corrected text through
+  uinput, and switches the compositor layout.
+vendor: PowerSwitcher
+homepage: https://github.com/illnar-io/power_switcher
+license: MIT
+
+depends:
+  - gtk4
+
+overrides:
+  deb:
+    depends:
+      - libgtk-4-1
+      - systemd
+      - udev
+  rpm:
+    depends:
+      - gtk4
+      - systemd
+  archlinux:
+    depends:
+      - gtk4
+      - systemd
+
+scripts:
+  postinstall: ./packaging/postinstall.sh
+  postremove: ./packaging/postremove.sh
+
+contents:
+  - src: ./target/release/ps
+    dst: /usr/bin/power-switcher
+    file_info:
+      mode: 0755
+  - src: ./target/release/ps-gui
+    dst: /usr/bin/power-switcher-gui
+    file_info:
+      mode: 0755
+  - src: ./packaging/power_switcher.service
+    dst: /usr/lib/systemd/user/power_switcher.service
+    file_info:
+      mode: 0644
+  - src: ./udev/60-power_switcher.rules
+    dst: /usr/lib/udev/rules.d/60-power_switcher.rules
+    file_info:
+      mode: 0644
+  - src: ./packaging/power_switcher.modules-load.conf
+    dst: /usr/lib/modules-load.d/power_switcher.conf
+    file_info:
+      mode: 0644
+  - src: ./packaging/power-switcher.desktop
+    dst: /usr/share/applications/power-switcher.desktop
+    file_info:
+      mode: 0644
+  - src: ./packaging/power-switcher.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/power-switcher.svg
+    file_info:
+      mode: 0644
+  - src: ./crates/ps-core/data/layouts.json
+    dst: /usr/share/power_switcher/layouts.json
+    file_info:
+      mode: 0644
+  - src: ./power_switcher/detection/profiles
+    dst: /usr/share/power_switcher/profiles
+    type: tree
+  - src: ./gnome-extension/power-switcher-focus@powerswitcher
+    dst: /usr/share/gnome-shell/extensions/power-switcher-focus@powerswitcher
+    type: tree

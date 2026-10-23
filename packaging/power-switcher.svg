@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect x="16" y="16" width="224" height="224" rx="48" fill="#1c71d8"/>
+  <rect x="36" y="86" width="184" height="100" rx="14" fill="#f6f5f4"/>
+  <g fill="#1c71d8">
+    <rect x="50" y="100" width="18" height="14" rx="3"/>
+    <rect x="76" y="100" width="18" height="14" rx="3"/>
+    <rect x="102" y="100" width="18" height="14" rx="3"/>
+    <rect x="128" y="100" width="18" height="14" rx="3"/>
+    <rect x="154" y="100" width="18" height="14" rx="3"/>
+    <rect x="180" y="100" width="26" height="14" rx="3"/>
+    <rect x="50" y="122" width="18" height="14" rx="3"/>
+    <rect x="76" y="122" width="18" height="14" rx="3"/>
+    <rect x="102" y="122" width="18" height="14" rx="3"/>
+    <rect x="128" y="122" width="18" height="14" rx="3"/>
+    <rect x="154" y="122" width="52" height="14" rx="3"/>
+    <rect x="50" y="144" width="26" height="14" rx="3"/>
+    <rect x="84" y="144" width="120" height="14" rx="3"/>
+    <rect x="212" y="144" width="14" height="14" rx="3"/>
+  </g>
+  <path d="M188 64l-14 22h10v18h8V86h10z" fill="#f6f5f4" opacity=".95"/>
+  <path d="M68 64l14 22H72v18h-8V86H54z" fill="#f6f5f4" opacity=".95"/>
+</svg>

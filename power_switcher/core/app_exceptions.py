@@ -58,6 +58,10 @@ class ExceptionStore:
             json.dumps(self._exceptions, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        try:
+            self._path.chmod(0o600)
+        except OSError:
+            pass
 
     def get_mode(self, app_name: str) -> str:
         """Return 'off', 'soft', or 'default' for an app."""

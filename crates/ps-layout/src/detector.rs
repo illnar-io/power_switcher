@@ -8,7 +8,7 @@ use log::{info, warn};
 use crate::backends::{GnomeBackend, HyprlandBackend, KdeBackend, LayoutBackend, SwayBackend};
 
 /// Detect the DE and return the best available layout backend.
-pub fn detect_layout_backend() -> Result<Box<dyn LayoutBackend>, String> {
+pub fn detect_layout_backend() -> Result<Box<dyn LayoutBackend + Send>, String> {
     let desktop = std::env::var("XDG_CURRENT_DESKTOP")
         .unwrap_or_default()
         .to_uppercase();

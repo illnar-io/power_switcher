@@ -21,6 +21,7 @@
 
 pub mod anti_resonance;
 pub mod app_exceptions;
+pub mod fsutil;
 pub mod key_buffer;
 pub mod layout_set;
 pub mod layouts;

@@ -445,6 +445,10 @@ class SettingsTab(ttk.Frame):
             "",
         ]
         _CONFIG_PATH.write_text("\n".join(lines), encoding="utf-8")
+        try:
+            _CONFIG_PATH.chmod(0o600)
+        except OSError:
+            pass
 
 
 class WordsTab(ttk.Frame):

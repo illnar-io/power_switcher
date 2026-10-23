@@ -66,6 +66,10 @@ class SnippetStore:
             json.dumps(self._pairs, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        try:
+            self._path.chmod(0o600)
+        except OSError:
+            pass
 
     def expansion(self, typed_word: str) -> str | None:
         """Return expansion if typed_word matches a snippet trigger, else None."""
@@ -82,7 +86,7 @@ class SnippetStore:
         self._pairs.append((trigger, expansion))
         self._index[canon] = expansion
         self._persist()
-        logger.info("Snippet added: %s → %s", trigger, expansion)
+        logger.info("Snippet added (%d -> %d chars)", len(trigger), len(expansion))
 
     def remove(self, trigger: str) -> bool:
         canon = _canonical(trigger)
@@ -94,7 +98,7 @@ class SnippetStore:
         if removed:
             self._index.pop(canon, None)
             self._persist()
-            logger.info("Snippet removed: %s", trigger)
+            logger.info("Snippet removed (%d chars)", len(trigger))
         return removed
 
     def set_all(self, pairs: list[tuple[str, str]]):

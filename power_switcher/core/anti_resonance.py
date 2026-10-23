@@ -30,9 +30,10 @@ class AntiResonanceGuard:
             if prev_produced == word and now - prev_time < self._freeze_seconds:
                 self._frozen_until = now + self._freeze_seconds
                 logger.warning(
-                    "Anti-resonance: oscillation detected '%s'→'%s'→'%s' — "
+                    "Anti-resonance: oscillation detected (%d -> %d -> %d chars) — "
                     "freezing auto for %.1fs",
-                    prev_word, prev_produced, word, self._freeze_seconds,
+                    len(prev_word), len(prev_produced), len(word),
+                    self._freeze_seconds,
                 )
                 self._history.clear()
                 return False
@@ -40,9 +41,9 @@ class AntiResonanceGuard:
             if word == prev_word and produced == prev_produced and now - prev_time < self._freeze_seconds:
                 self._frozen_until = now + self._freeze_seconds
                 logger.warning(
-                    "Anti-resonance: repeated conversion '%s'→'%s' — "
+                    "Anti-resonance: repeated conversion (%d -> %d chars) — "
                     "freezing auto for %.1fs",
-                    word, produced, self._freeze_seconds,
+                    len(word), len(produced), self._freeze_seconds,
                 )
                 self._history.clear()
                 return False

@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use ps_core::fsutil::read_private;
 use serde::Deserialize;
 
 /// Hotkey values written by older versions; `Config::load` upgrades them.
@@ -39,6 +40,8 @@ pub struct Config {
     pub developer_mode: bool,
     pub arrows_cancel: bool,
     pub live_fix_enabled: bool,
+    /// Autocorrect one-edit typos towards the language's common vocabulary.
+    pub spell_check: bool,
 
     // Layout-switch guards & hotkeys
     pub no_correct_after_switch: f64,
@@ -85,6 +88,7 @@ impl Default for Config {
             developer_mode: false,
             arrows_cancel: true,
             live_fix_enabled: true,
+            spell_check: true,
             no_correct_after_switch: 1.5,
             lr_shift_pause: true,
             manual_only_last_word: false,
@@ -127,6 +131,7 @@ struct GeneralSection {
     developer_mode: Option<bool>,
     arrows_cancel: Option<bool>,
     live_fix_enabled: Option<bool>,
+    spell_check: Option<bool>,
     lr_shift_pause: Option<bool>,
     no_correct_after_switch: Option<f64>,
     manual_only_last_word: Option<bool>,
@@ -170,7 +175,7 @@ impl Config {
         if !p.exists() {
             return Ok(Self::default());
         }
-        let text = std::fs::read_to_string(p).map_err(|e| e.to_string())?;
+        let text = read_private(p).map_err(|e| e.to_string())?;
         let file: ConfigFile = toml::from_str(&text).map_err(|e| e.to_string())?;
         let mut c = Self::default();
         let g = file.general;
@@ -212,6 +217,9 @@ impl Config {
         }
         if let Some(v) = g.live_fix_enabled {
             c.live_fix_enabled = v;
+        }
+        if let Some(v) = g.spell_check {
+            c.spell_check = v;
         }
         if let Some(v) = g.lr_shift_pause {
             c.lr_shift_pause = v;
@@ -321,6 +329,7 @@ impl Config {
             format!("developer_mode = {}", self.developer_mode),
             format!("arrows_cancel = {}", self.arrows_cancel),
             format!("live_fix_enabled = {}", self.live_fix_enabled),
+            format!("spell_check = {}", self.spell_check),
             format!("lr_shift_pause = {}", self.lr_shift_pause),
             format!("shift_tap_switch_layout = {}", self.shift_tap_switch_layout),
             format!("manual_only_last_word = {}", self.manual_only_last_word),

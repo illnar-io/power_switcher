@@ -69,6 +69,10 @@ class Stats:
                 json.dumps(data, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
+            try:
+                self.path.chmod(0o600)
+            except OSError:
+                pass
         except Exception as exc:
             logger.warning("Failed to save stats: %s", exc)
 
