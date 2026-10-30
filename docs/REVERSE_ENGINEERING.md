@@ -54,7 +54,7 @@ These map directly onto PowerSwitcher features:
 | Instant text input correction | `live_fix_enabled` (mid-word conversion) |
 | Switch Only Last Word | `manual_only_last_word` |
 | Play Switching Sound | `sound_enabled` |
-| Display Layout Flag | (not implemented — needs a tray/applet) |
+| Display Layout Flag | (not implemented — the tray exists, the layout flag does not) |
 
 ### 1.2 Word-frequency lists (the extractable asset)
 

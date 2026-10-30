@@ -4,7 +4,7 @@ platform: linux
 version: ${VERSION}
 section: utils
 priority: optional
-maintainer: Ilnar Nizametdinov <nizametdinov@gmail.com>
+maintainer: Ilnar Nizametdinov <illnar.io.io@gmail.com>
 description: |
   Automatically converts text typed in the wrong keyboard layout on Linux
   Wayland.  Grabs keyboards through evdev, injects corrected text through

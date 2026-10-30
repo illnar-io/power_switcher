@@ -34,6 +34,8 @@ Like Punto Switcher / Caramba Switcher / Keyboop, but for Linux Wayland.
 - **Guard after layout switch**: Optionally skip corrections for N seconds after
   the layout changes, so manual switching is not fought by the detector.
 - **Statistics**: Counts conversions, snippet expansions and undos.
+- **Tray icon**: GNOME/KDE top-bar indicator (StatusNotifierItem) with
+  Settings / Restart daemon / Exit; the icon follows the desktop theme.
 - **Settings GUI**: `power-switcher gui` (GTK4, `power-switcher-gui`) or the
   legacy `python -m power_switcher gui` (tkinter); both edit the same files.
 
@@ -400,6 +402,8 @@ cargo test --workspace
 PYTHONPATH=. pytest          # Python reference implementation
 ```
 
+Release history: [`CHANGELOG.md`](CHANGELOG.md).
+
 ## License
 
 MIT
@@ -412,7 +416,7 @@ MIT
 [![Telegram](https://img.shields.io/badge/Telegram-ILLnar-26A5E4?logo=telegram&logoColor=white)](https://t.me/ILLnar)
 [![GitHub](https://img.shields.io/badge/GitHub-illnar--io-181717?logo=github&logoColor=white)](https://github.com/illnar-io)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-illnar-0077B5?logo=linkedin&logoColor=white)](https://linkedin.com/in/illnar)
-[![Email](https://img.shields.io/badge/Email-nizametdinov%40gmail.com-D14836?logo=gmail&logoColor=white)](mailto:nizametdinov@gmail.com)
+[![Email](https://img.shields.io/badge/Email-illnar.io.io%40gmail.com-D14836?logo=gmail&logoColor=white)](mailto:illnar.io.io@gmail.com)
 
 ## 💝 Support the Project
 
@@ -420,6 +424,6 @@ If my work helps you, consider supporting its development:
 
 - ⭐ **GitHub Sponsors**: <https://github.com/sponsors/illnar-io>
 - **Ko-Fi**: <https://ko-fi.com/illnar>
-- **PayPal**: [nizametdinov@gmail.com](mailto:nizametdinov@gmail.com)
+- **PayPal**: [illnar.io.io@gmail.com](mailto:illnar.io.io@gmail.com)
 - **Bunq**: <https://bunq.me/INizametdinov>
 - **Revolut**: `@illnar_nizami`

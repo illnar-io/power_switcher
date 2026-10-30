@@ -7,7 +7,7 @@ name = "power_switcher"
 version = "0.1.0"
 description = "DE-independent keyboard layout auto-switcher for Linux Wayland"
 readme = "README.md"
-authors = [{name = "Illnar", email = "illnar@example.com"}]
+authors = [{name = "Illnar", email = "illnar.io.io@gmail.com"}]
 license = {text = "MIT"}
 requires-python = ">=3.11"
 dependencies = [

@@ -19,8 +19,9 @@ venv/
 /target/
 **/*.rs.bk
 
-# Generated knowledge graph (rebuild locally with `graphify update .`)
+# Generated knowledge graph and analysis reports (rebuild locally)
 graphify-out/
+/ANALYSIS.md
 
 # Generated/derived scratch data, except the reference word-frequency lists
 # that build_profiles.py needs to regenerate the n-gram profiles.
@@ -37,6 +38,9 @@ Thumbs.db
 *.swp
 *.swo
 *~
+*.orig
+*.rej
+*.bak
 .idea/
 .vscode/
 

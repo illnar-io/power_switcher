@@ -15,6 +15,9 @@ GTK 4.10+; there is no LTS/old-release support.
 | `/usr/lib/modules-load.d/power_switcher.conf` | load `uinput` at boot |
 | `/usr/lib/systemd/user/power_switcher.service` | per-user daemon unit |
 | `/usr/share/applications/power-switcher.desktop` | application launcher |
+| `/usr/share/icons/hicolor/scalable/apps/power-switcher.svg` | application icon |
+| `/usr/share/icons/hicolor/<size>x<size>/apps/power-switcher.png` | application icon, 16–512 px |
+| `/usr/share/icons/hicolor/symbolic/apps/power-switcher-symbolic.svg` | theme-aware tray icon |
 | `/usr/share/gnome-shell/extensions/power-switcher-focus@powerswitcher/` | GNOME helper |
 
 The installed daemon is called `power-switcher`, not `ps`, because `/usr/bin/ps`
