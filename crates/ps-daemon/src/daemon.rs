@@ -23,7 +23,7 @@ use ps_input::{find_keyboards, VirtualKeyboard};
 use ps_layout::LayoutBackend;
 
 /// Idle poll interval of the main loop (also the shutdown latency bound).
-const LOOP_TICK: Duration = Duration::from_millis(50);
+const LOOP_TICK: Duration = Duration::from_millis(10);
 /// How often the real compositor layout is re-read (manual switches are
 /// invisible to the daemon: Super+Space is consumed by the compositor).
 const LAYOUT_SYNC_INTERVAL: Duration = Duration::from_millis(250);
@@ -214,6 +214,7 @@ pub fn run(mut processor: Processor, backend: Box<dyn LayoutBackend + Send>, tra
     }
 
     // Top-bar tray.  Non-fatal: the daemon must keep converting without one.
+    // Keep the Handle alive for the daemon's lifetime; dropping it unregisters the tray.
     let _tray = crate::tray::spawn(stop.clone());
 
     info!("daemon running — Ctrl+C to stop");
@@ -273,6 +274,7 @@ pub fn run(mut processor: Processor, backend: Box<dyn LayoutBackend + Send>, tra
                 if stop.load(Ordering::Relaxed) {
                     break 'main;
                 }
+                std::thread::yield_now();
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break 'main,
         }

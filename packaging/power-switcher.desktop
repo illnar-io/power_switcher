@@ -9,3 +9,4 @@ Terminal=false
 Categories=Utility;
 Keywords=keyboard;layout;switcher;typing;раскладка;клавиатура;
 StartupNotify=true
+StartupWMClass=org.power_switcher.Settings

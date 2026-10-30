@@ -136,6 +136,7 @@ BIN_DIR=$PREFIX/bin
 SHARE_DIR=$PREFIX/share/power_switcher
 DESKTOP_DIR=$DATA_HOME/applications
 ICON_DIR=$DATA_HOME/icons/hicolor/scalable/apps
+HICOLOR_DIR=$DATA_HOME/icons/hicolor
 UNIT_DIR=$CONFIG_HOME/systemd/user
 GNOME_DIR=$DATA_HOME/gnome-shell/extensions
 UNIT_NAME=power_switcher.service
@@ -147,6 +148,10 @@ if [ "$UNINSTALL" -eq 1 ]; then
     fi
     rm -f "$BIN_DIR/power-switcher" "$BIN_DIR/power-switcher-gui"
     rm -f "$DESKTOP_DIR/power-switcher.desktop" "$ICON_DIR/power-switcher.svg"
+    rm -f "$HICOLOR_DIR/symbolic/apps/power-switcher-symbolic.svg"
+    for size in 16 22 24 32 48 64 128 256 512; do
+        rm -f "$HICOLOR_DIR/${size}x${size}/apps/power-switcher.png"
+    done
     rm -f "$UNIT_DIR/$UNIT_NAME"
     rm -rf "$SHARE_DIR" "$GNOME_DIR/power-switcher-focus@powerswitcher"
     if [ "$NO_UDEV" -eq 0 ]; then
@@ -236,7 +241,20 @@ fi
 [ -x "$SRC/bin/power-switcher" ] || die "tarball is missing bin/power-switcher"
 [ -x "$SRC/bin/power-switcher-gui" ] || die "tarball is missing bin/power-switcher-gui"
 
-install -d "$BIN_DIR" "$SHARE_DIR" "$DESKTOP_DIR" "$ICON_DIR" "$UNIT_DIR"
+install -d "$BIN_DIR" "$SHARE_DIR" "$DESKTOP_DIR" "$ICON_DIR" "$HICOLOR_DIR" "$UNIT_DIR"
+for size in 16 22 24 32 48 64 128 256 512; do
+    install -d "$HICOLOR_DIR/${size}x${size}/apps"
+    if [ -f "$SRC/share/icons/hicolor/${size}x${size}/apps/power-switcher.png" ]; then
+        install -m 644 "$SRC/share/icons/hicolor/${size}x${size}/apps/power-switcher.png" \
+            "$HICOLOR_DIR/${size}x${size}/apps/power-switcher.png"
+    fi
+done
+# symbolic icon (theme-aware)
+if [ -f "$SRC/share/icons/hicolor/symbolic/apps/power-switcher-symbolic.svg" ]; then
+    install -d "$HICOLOR_DIR/symbolic/apps"
+    install -m 644 "$SRC/share/icons/hicolor/symbolic/apps/power-switcher-symbolic.svg" \
+        "$HICOLOR_DIR/symbolic/apps/power-switcher-symbolic.svg"
+fi
 install -m 755 "$SRC/bin/power-switcher" "$BIN_DIR/power-switcher"
 install -m 755 "$SRC/bin/power-switcher-gui" "$BIN_DIR/power-switcher-gui"
 

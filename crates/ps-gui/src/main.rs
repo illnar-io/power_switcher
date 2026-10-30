@@ -35,6 +35,7 @@ fn build_ui(app: &Application) {
         .title("PowerSwitcher")
         .default_width(900)
         .default_height(720)
+        .icon_name("power-switcher")
         .build();
 
     let settings = Rc::new(tabs::settings::SettingsTab::new(&state.config));
@@ -121,6 +122,7 @@ fn error_window(app: &Application, message: &str) {
         .application(app)
         .title("PowerSwitcher")
         .default_width(560)
+        .icon_name("power-switcher")
         .build();
     let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
     content.set_margin_top(24);

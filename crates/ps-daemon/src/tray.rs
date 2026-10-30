@@ -2,8 +2,10 @@
 //!
 //! GNOME has no tray of its own; the AppIndicator extension hosts SNI items.
 //! The tray lives in the daemon process, so it appears and disappears with the
-//! service.  `assume_sni_available` lets the daemon start before the desktop
-//! session: ksni registers as soon as `org.kde.StatusNotifierWatcher` appears.
+//! service. Uses ksni blocking API with tokio runtime.
+//!
+//! Use `disable_dbus_name(true)` to use the unique bus name instead of a
+//! well-known name, which works better in some environments (flatpak, etc.).
 
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,7 +20,6 @@ pub(crate) struct PowerSwitcherTray {
 }
 
 impl ksni::Tray for PowerSwitcherTray {
-    /// Left click opens the menu (Settings / Restart daemon).
     const MENU_ON_ACTIVATE: bool = true;
 
     fn id(&self) -> String {
@@ -30,7 +31,11 @@ impl ksni::Tray for PowerSwitcherTray {
     }
 
     fn icon_name(&self) -> String {
-        "input-keyboard-symbolic".into()
+        "power-switcher-symbolic".into()
+    }
+
+    fn category(&self) -> ksni::Category {
+        ksni::Category::SystemServices
     }
 
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
@@ -60,10 +65,12 @@ impl ksni::Tray for PowerSwitcherTray {
     }
 }
 
-/// Start the tray in the background.  No session bus or no SNI host is not
-/// fatal: layout conversion must keep working without a tray.
+/// Start the tray in the background. Returns a Handle that must be kept alive
+/// for the tray to stay registered.
 pub(crate) fn spawn(stop: Arc<AtomicBool>) -> Option<Handle<PowerSwitcherTray>> {
-    match (PowerSwitcherTray { stop })
+    let tray = PowerSwitcherTray { stop };
+    match tray
+        .disable_dbus_name(true)
         .assume_sni_available(true)
         .spawn()
     {
@@ -79,9 +86,8 @@ pub(crate) fn spawn(stop: Arc<AtomicBool>) -> Option<Handle<PowerSwitcherTray>> 
 }
 
 fn open_settings() {
-    // Same binary: `ps gui` locates the sibling `ps-gui` (and keeps GTK out
-    // of the daemon).  systemd-run gives the GUI its own unit: children of the
-    // daemon share its service cgroup and would be killed by a daemon restart.
+    // systemd-run gives the GUI its own unit: children of the daemon share its
+    // service cgroup and would be killed by a daemon restart.
     let Ok(exe) = std::env::current_exe() else {
         warn!("tray: cannot resolve the ps binary for Settings");
         return;
@@ -110,9 +116,8 @@ fn restart_daemon() {
     }
 }
 
-/// Close the settings window (its own transient unit) and ask the main loop to
-/// stop.  Exiting through `stop` keeps the regular cleanup (stats save).
 fn exit_app(stop: &Arc<AtomicBool>) {
+    // Exiting through `stop` keeps the regular cleanup (stats save).
     let _ = Command::new("systemctl")
         .args(["--user", "stop", "power_switcher_gui.service"])
         .output();

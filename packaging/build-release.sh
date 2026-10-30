@@ -35,6 +35,16 @@ install -d "$STAGE/bin" "$STAGE/share/power_switcher/profiles" \
     "$STAGE/share/applications" "$STAGE/share/icons/hicolor/scalable/apps" \
     "$STAGE/lib/systemd/user" "$STAGE/lib/udev/rules.d" "$STAGE/lib/modules-load.d" \
     "$STAGE/share/gnome-shell/extensions"
+# hicolor icon theme (PNG at multiple sizes)
+for size in 16 22 24 32 48 64 128 256 512; do
+    install -d "$STAGE/share/icons/hicolor/${size}x${size}/apps"
+    install -m 644 assets/icon/hicolor/${size}x${size}/apps/power-switcher.png \
+        "$STAGE/share/icons/hicolor/${size}x${size}/apps/"
+done
+# symbolic icon (theme-aware: white on dark, black on light)
+install -d "$STAGE/share/icons/hicolor/symbolic/apps"
+install -m 644 assets/icon/hicolor/symbolic/apps/power-switcher-symbolic.svg \
+    "$STAGE/share/icons/hicolor/symbolic/apps/"
 
 install -m 755 target/release/ps "$STAGE/bin/power-switcher"
 install -m 755 target/release/ps-gui "$STAGE/bin/power-switcher-gui"

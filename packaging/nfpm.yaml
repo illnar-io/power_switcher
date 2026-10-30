@@ -64,6 +64,13 @@ contents:
     dst: /usr/share/icons/hicolor/scalable/apps/power-switcher.svg
     file_info:
       mode: 0644
+  - src: ./packaging/power-switcher-symbolic.svg
+    dst: /usr/share/icons/hicolor/symbolic/apps/power-switcher-symbolic.svg
+    file_info:
+      mode: 0644
+  - src: ./assets/icon/hicolor
+    dst: /usr/share/icons/hicolor
+    type: tree
   - src: ./crates/ps-core/data/layouts.json
     dst: /usr/share/power_switcher/layouts.json
     file_info:

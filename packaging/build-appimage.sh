@@ -34,6 +34,12 @@ rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/power_switcher/profiles" \
     "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/scalable/apps" \
     "$APPDIR/usr/share/gnome-shell/extensions"
+# hicolor icon theme (PNG at multiple sizes)
+for size in 16 22 24 32 48 64 128 256 512; do
+    install -d "$APPDIR/usr/share/icons/hicolor/${size}x${size}/apps"
+    install -m 644 assets/icon/hicolor/${size}x${size}/apps/power-switcher.png \
+        "$APPDIR/usr/share/icons/hicolor/${size}x${size}/apps/"
+done
 
 install -m 755 target/release/ps "$APPDIR/usr/bin/power-switcher"
 install -m 755 target/release/ps-gui "$APPDIR/usr/bin/power-switcher-gui"
