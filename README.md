@@ -410,6 +410,28 @@ MIT
 
 ---
 
+## 🙏 Credits and inspiration
+
+PowerSwitcher is an independent project. It exists because these tools showed
+what a wrong-layout switcher should feel like; their behaviour was studied as a
+black box (`docs/REVERSE_ENGINEERING.md`) and **no code or assets from them are
+redistributed** — `ref/` is git-ignored.
+
+- **Punto Switcher** (Yandex) — the original wrong-layout switcher: rule engine,
+  per-app exceptions, configurable triggers, mid-word conversion.
+- **Caramba Switcher** (Windows, written in Rust) — design reference for the
+  hotkeys and gestures (double Shift, Pause, `Ctrl+Alt+Z`), plus the
+  "dictionary + language model" split we copied conceptually.
+- **Keyboop** (GNOME Shell) — the layout-independent snippet matching pattern.
+- **Lang Switcher** (macOS) — its per-language word-frequency lists are the
+  source of `data/frequency/*.txt.gz` and therefore of the generated n-gram
+  profiles.
+
+Built on open-source work: `evdev`/`uinput`, `ksni` (StatusNotifierItem),
+GTK 4, the AppIndicator GNOME extension, `nfpm`.
+
+---
+
 ## 💬 Connect
 
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-illnar--io-ea4aaa?logo=github-sponsors&logoColor=white)](https://github.com/sponsors/illnar-io)
