@@ -42,6 +42,8 @@ pub struct Config {
     pub live_fix_enabled: bool,
     /// Autocorrect one-edit typos towards the language's common vocabulary.
     pub spell_check: bool,
+    /// Debug-level logging to the journal (the GUI surfaces this toggle).
+    pub debug_log: bool,
 
     // Layout-switch guards & hotkeys
     pub no_correct_after_switch: f64,
@@ -89,6 +91,7 @@ impl Default for Config {
             arrows_cancel: true,
             live_fix_enabled: true,
             spell_check: true,
+            debug_log: false,
             no_correct_after_switch: 1.5,
             lr_shift_pause: true,
             manual_only_last_word: false,
@@ -132,6 +135,7 @@ struct GeneralSection {
     arrows_cancel: Option<bool>,
     live_fix_enabled: Option<bool>,
     spell_check: Option<bool>,
+    debug_log: Option<bool>,
     lr_shift_pause: Option<bool>,
     no_correct_after_switch: Option<f64>,
     manual_only_last_word: Option<bool>,
@@ -220,6 +224,9 @@ impl Config {
         }
         if let Some(v) = g.spell_check {
             c.spell_check = v;
+        }
+        if let Some(v) = g.debug_log {
+            c.debug_log = v;
         }
         if let Some(v) = g.lr_shift_pause {
             c.lr_shift_pause = v;
@@ -330,6 +337,7 @@ impl Config {
             format!("arrows_cancel = {}", self.arrows_cancel),
             format!("live_fix_enabled = {}", self.live_fix_enabled),
             format!("spell_check = {}", self.spell_check),
+            format!("debug_log = {}", self.debug_log),
             format!("lr_shift_pause = {}", self.lr_shift_pause),
             format!("shift_tap_switch_layout = {}", self.shift_tap_switch_layout),
             format!("manual_only_last_word = {}", self.manual_only_last_word),
@@ -431,6 +439,7 @@ mod tests {
             !c.shift_tap_switch_layout,
             "lone Shift tap must not switch layouts by default"
         );
+        assert!(!c.debug_log, "debug logging is opt-in");
     }
 
     #[test]
@@ -472,6 +481,7 @@ mod tests {
 layouts = ["de", "fr", "ru"]
 default_layout = "de"
 developer_mode = true
+debug_log = true
 no_correct_after_switch = 2.0
 sound_enabled = false
 shift_tap_switch_layout = true
@@ -495,6 +505,7 @@ seconds = 5.0
         assert_eq!(c.layouts, vec!["de", "fr", "ru"]);
         assert_eq!(c.default_layout, "de");
         assert!(c.developer_mode);
+        assert!(c.debug_log);
         assert_eq!(c.no_correct_after_switch, 2.0);
         assert!(!c.sound_enabled);
         assert!(c.shift_tap_switch_layout);
@@ -586,6 +597,7 @@ seconds = 5.0
             undo_seconds: 5.0,
             no_correct_after_switch: 2.0,
             developer_mode: true,
+            debug_log: true,
             sound_enabled: false,
             shift_tap_switch_layout: true,
             trigger_punctuation: false,

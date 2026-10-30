@@ -38,7 +38,30 @@ Like Punto Switcher / Caramba Switcher / Keyboop, but for Linux Wayland.
   Settings / Restart daemon / Exit; the icon follows the desktop theme.
 - **Settings GUI**: `power-switcher gui` (GTK4, `power-switcher-gui`) or the
   legacy `python -m power_switcher gui` (tkinter); both edit the same files.
+- **Diagnostics**: one-click debug logging plus **Report a problem…**, which
+  sends user-fixable issues to the FAQ and copies a ready-to-paste report for
+  everything else.
 
+
+## How it compares
+
+Wrong-layout switchers exist for every desktop; almost none of them support
+Linux Wayland. PowerSwitcher is the Wayland-native, open-source option.
+
+| Project | Platforms | Licence | Auto-switch + fix | Notes |
+|---|---|---|---|---|
+| **PowerSwitcher** | Linux (Wayland: GNOME, KDE, Sway, Hyprland) | MIT | Yes, direct UInput injection | 8 layouts, snippets, per-app modes, learned words, GTK 4 settings, tray |
+| [Punto Switcher](https://yandex.ru/soft/punto/) | Windows (legacy macOS build) | Proprietary, free | Yes | The original: rule engine, per-app exceptions, snippets |
+| [Caramba Switcher](https://caramba-switcher.com/) | Windows, macOS | Proprietary, Classic free / Pro paid | Yes | From Punto's author; dictionary + language model, almost no settings |
+| [xneur](https://launchpad.net/xneur) | Linux X11, FreeBSD | GPL-2.0 | Yes | Oldest Linux option: auto and manual modes, per-app exclusions, ~19 languages, no Wayland |
+| [Keyboop](https://github.com/iffuno/keyboop) | macOS | MIT | Yes, clipboard-free | Menu bar, snippets, flexible undo window, local dictation |
+| [Lang Switcher](https://lang-switcher.com/) | macOS | Proprietary, freemium | Yes | Hotkeys, per-app exceptions, English/Russian/Ukrainian |
+| [PolterType](https://github.com/Just-Code-NET/PolterType) | Windows, macOS, Linux (Wayland + X11) | MIT | Yes | Rust, tray app, zero telemetry |
+
+PowerSwitcher keeps settings in plain TOML/JSON, injects text through its own
+`uinput` device instead of the clipboard or `ydotool`, and works without
+per-app configuration. It is younger than the rest: fewer languages, no
+Windows/macOS build, and no cloud language model.
 
 ## Requirements
 
@@ -198,6 +221,8 @@ auto_detect      = true
 developer_mode   = false           # Disable auto in IDEs/terminals
 arrows_cancel    = true            # Arrow keys clear buffer
 live_fix_enabled = true            # Mid-word eager conversion
+spell_check      = true            # Autocorrect single-edit typos
+debug_log        = false           # Debug-level logging (Settings → Diagnostics)
 lr_shift_pause   = true            # L+R Shift pauses auto-detection
 hotkey_convert   = "ctrl+alt+z"    # manual convert/undo ("pause" = Caramba key, "off" = none)
 hotkey_selection = "alt+shift"     # selection convert (reserved; not on Wayland yet)
@@ -402,7 +427,9 @@ cargo test --workspace
 PYTHONPATH=. pytest          # Python reference implementation
 ```
 
-Release history: [`CHANGELOG.md`](CHANGELOG.md).
+Release history: [`CHANGELOG.md`](CHANGELOG.md). Troubleshooting, known fixes
+and the bug-report flow are in [`docs/FAQ.md`](docs/FAQ.md); the settings window
+also has **Status → Report a problem…**, which copies a ready-to-paste report.
 
 ## License
 
@@ -417,12 +444,14 @@ what a wrong-layout switcher should feel like; their behaviour was studied as a
 black box (`docs/REVERSE_ENGINEERING.md`) and **no code or assets from them are
 redistributed** — `ref/` is git-ignored.
 
-- **Punto Switcher** (Yandex) — the original wrong-layout switcher: rule engine,
-  per-app exceptions, configurable triggers, mid-word conversion.
-- **Caramba Switcher** (Windows, written in Rust) — design reference for the
-  hotkeys and gestures (double Shift, Pause, `Ctrl+Alt+Z`), plus the
+- **Punto Switcher** (Yandex, Windows) — the original wrong-layout switcher:
+  rule engine, per-app exceptions, configurable triggers, mid-word conversion.
+- **Caramba Switcher** (Windows/macOS, written in Rust) — design reference for
+  the hotkeys and gestures (double Shift, Pause, `Ctrl+Alt+Z`), plus the
   "dictionary + language model" split we copied conceptually.
-- **Keyboop** (GNOME Shell) — the layout-independent snippet matching pattern.
+- **Keyboop** (macOS, MIT) — the layout-independent snippet idea and the proof
+  that correction can avoid the clipboard entirely: PowerSwitcher injects the
+  fixed text through `uinput` instead of pasting it.
 - **Lang Switcher** (macOS) — its per-language word-frequency lists are the
   source of `data/frequency/*.txt.gz` and therefore of the generated n-gram
   profiles.

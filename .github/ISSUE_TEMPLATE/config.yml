@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: FAQ and troubleshooting
+    url: https://github.com/illnar-io/power_switcher/blob/main/docs/FAQ.md
+    about: Nothing converted, wrong conversions, keyboard stops, missing tray icon.
+  - name: Ask a question
+    url: https://t.me/ILLnar
+    about: Quick questions and setup help.

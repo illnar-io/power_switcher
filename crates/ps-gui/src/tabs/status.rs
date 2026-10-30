@@ -8,6 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use gtk::prelude::*;
 
 use ps_core::Stats;
+use ps_daemon::Config;
 
 use crate::state::GuiState;
 use crate::ui;
@@ -19,6 +20,8 @@ const UNIT_NAME: &str = "power_switcher.service";
 pub struct StatusTab {
     pub root: gtk::ScrolledWindow,
     window: gtk::Window,
+    config: Config,
+    config_path: PathBuf,
     stats_path: PathBuf,
     daemon: gtk::Label,
     layout: gtk::Label,
@@ -180,11 +183,13 @@ impl StatusTab {
         let restart = gtk::Button::with_label("Restart daemon");
         restart.add_css_class("suggested-action");
         let install = gtk::Button::with_label("Install service");
+        let report = gtk::Button::with_label("Report a problem…");
         let reset = gtk::Button::with_label("Reset statistics");
         reset.add_css_class("destructive-action");
         buttons.append(&refresh);
         buttons.append(&restart);
         buttons.append(&install);
+        buttons.append(&report);
         buttons.append(&reset);
         content.append(&buttons);
         content.append(&ui::hint(
@@ -218,6 +223,8 @@ impl StatusTab {
         let tab = Self {
             root,
             window: window.clone(),
+            config: state.config.clone(),
+            config_path: state.config_path.clone(),
             stats_path: state.stats_path.clone(),
             daemon,
             layout,
@@ -240,6 +247,12 @@ impl StatusTab {
         }
         {
             let tab = tab.clone_refs();
+            report.connect_clicked(move |_| {
+                crate::report::dialog(&tab.window, &tab.config, &tab.config_path);
+            });
+        }
+        {
+            let tab = tab.clone_refs();
             reset.connect_clicked(move |_| tab.confirm_reset());
         }
 
@@ -252,6 +265,8 @@ impl StatusTab {
         Self {
             root: self.root.clone(),
             window: self.window.clone(),
+            config: self.config.clone(),
+            config_path: self.config_path.clone(),
             stats_path: self.stats_path.clone(),
             daemon: self.daemon.clone(),
             layout: self.layout.clone(),

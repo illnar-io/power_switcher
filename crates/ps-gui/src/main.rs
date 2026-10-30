@@ -4,6 +4,7 @@
 //! Applications (per-app modes), Words, Status.  The GUI has no daemon IPC:
 //! it edits the same files the daemon and the CLI use.
 
+mod report;
 mod state;
 mod tabs;
 mod ui;

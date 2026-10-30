@@ -61,18 +61,7 @@ fn main() {
             verbose,
             no_auto,
             debug,
-        } => {
-            env_logger::Builder::from_env(
-                env_logger::Env::default().default_filter_or(if verbose {
-                    "debug"
-                } else {
-                    "info"
-                }),
-            )
-            .format_timestamp_millis()
-            .init();
-            cmd_daemon(&config, no_auto, debug);
-        }
+        } => cmd_daemon(&config, verbose, no_auto, debug),
         Command::Setup => cmd_setup(),
         Command::Debug { .. } => cmd_debug(),
         Command::Gui => cmd_gui(),
@@ -112,10 +101,22 @@ fn cmd_gui() -> ! {
     std::process::exit(1);
 }
 
-fn cmd_daemon(config_path: &str, no_auto: bool, trace: bool) -> ! {
+fn cmd_daemon(config_path: &str, verbose: bool, no_auto: bool, trace: bool) -> ! {
     ps_core::fsutil::harden_private_dir(&config::default_config_dir());
     let cfg = Config::load(config::expand_tilde(config_path))
         .unwrap_or_else(|err| panic!("failed to load config {config_path}: {err}"));
+
+    // The GUI's "Debug logging" toggle must affect the daemon at startup, so
+    // the config is read before the logger is built.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(
+        if verbose || cfg.debug_log {
+            "debug"
+        } else {
+            "info"
+        },
+    ))
+    .format_timestamp_millis()
+    .init();
 
     let backend = ps_layout::detect_layout_backend().unwrap_or_else(|err| panic!("{err}"));
 

@@ -1,0 +1,87 @@
+name: Bug report
+description: Something is broken or behaves differently than expected
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Before filing, check the
+        [FAQ](https://github.com/illnar-io/power_switcher/blob/main/docs/FAQ.md) —
+        permissions, tray icons and wrong conversions usually have a known fix.
+
+        The easiest way to fill in the diagnostics is **Status → Report a
+        problem…** in the settings window: it copies this report to your
+        clipboard.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Problem area
+      options:
+        - Wrong conversion
+        - Nothing is converted
+        - Keyboard stops responding
+        - Tray icon
+        - Settings window
+        - Daemon crashes or will not start
+        - Installation / packaging
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you typed, what appeared and why it is wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Type …
+        3. See …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+    validations:
+      required: false
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste the report copied from Status → Report a problem… (or run `power-switcher --version`, `systemctl --user status power_switcher` and `journalctl --user -u power_switcher -n 100 --no-pager` by hand).
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: debug-log
+    attributes:
+      label: Debug log (optional)
+      description: Settings → Diagnostics → Debug logging, restart the daemon, reproduce, then paste `journalctl --user -u power_switcher -n 200 --no-pager`.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for the same problem
+          required: true
+        - label: I read the FAQ
+          required: true
+        - label: I removed typed text and personal data from the pasted logs
+          required: true

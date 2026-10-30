@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `debug_log` (off by default): the daemon logs at debug level when enabled.
+  The settings window exposes it under Settings → Diagnostics, and the daemon
+  reads it before initialising the logger so the toggle takes effect on restart.
+- Status → **Report a problem…**: asks what is broken, links user-fixable
+  problems to the FAQ section, and otherwise copies a ready-to-paste diagnostics
+  report (version, distro, session, settings, last 100 journal lines — never
+  typed text) before opening the GitHub issue form.
+- `docs/FAQ.md` with the known fixes for conversion, permissions, tray and GUI
+  problems, plus a structured `.github/ISSUE_TEMPLATE/bug_report.yml`.
+- README “How it compares” table covering Punto Switcher, Caramba Switcher,
+  xneur, Keyboop, Lang Switcher and PolterType.
+
+### Fixed
+
+- Keyboop is a macOS app (MIT, clipboard-free), not a GNOME Shell extension;
+  the credits section said otherwise.
+
 ## [0.1.0] - 2026-10-30
 
 First public release: the Rust daemon replaces the Python one, and the

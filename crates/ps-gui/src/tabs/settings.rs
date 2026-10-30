@@ -96,6 +96,7 @@ pub struct SettingsTab {
     manual_only_last_word: gtk::Switch,
     self_learning: gtk::Switch,
     sound_enabled: gtk::Switch,
+    debug_log: gtk::Switch,
     no_correct_after_switch: gtk::SpinButton,
 
     undo_words: gtk::SpinButton,
@@ -298,6 +299,16 @@ impl SettingsTab {
              daemon now; disabling leaves the running daemon alone (tray → Exit stops it).",
         ));
 
+        content.append(&ui::section("Diagnostics"));
+        let debug_grid = ui::form();
+        let debug_log = switch(config.debug_log);
+        ui::row(&debug_grid, 0, "Debug logging", &debug_log);
+        content.append(&debug_grid);
+        content.append(&ui::hint(
+            "Writes debug-level events to the journal. Enable it, restart the daemon, reproduce \
+             the problem, then use Status → Report a problem. Logs never contain typed words.",
+        ));
+
         Self {
             root,
             layouts,
@@ -321,6 +332,7 @@ impl SettingsTab {
             manual_only_last_word,
             self_learning,
             sound_enabled,
+            debug_log,
             no_correct_after_switch,
             undo_words,
             undo_seconds,
@@ -366,6 +378,7 @@ impl SettingsTab {
         config.manual_only_last_word = self.manual_only_last_word.is_active();
         config.self_learning = self.self_learning.is_active();
         config.sound_enabled = self.sound_enabled.is_active();
+        config.debug_log = self.debug_log.is_active();
         config.no_correct_after_switch = self.no_correct_after_switch.value();
 
         config.undo_words = self.undo_words.value() as usize;
